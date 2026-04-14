@@ -1,78 +1,25 @@
 # MacTools
 
-MacTools 是一个纯代码、纯菜单栏的 macOS 原生工具集脚手架。当前第一阶段只搭建最小可用架构，为后续实现一键黑屏、键盘清洁模式和更多系统工具预留扩展空间。
+MacTools 是一个 macOS 原生菜单栏工具应用，当前聚焦于“物理清洁模式”和快捷键管理，提供轻量、直接、不打扰日常工作的系统工具体验。
 
-## Architecture
+## 产品功能说明
 
-- `Sources/App`: App 生命周期、菜单栏入口、全局状态装配
-- `Sources/Features/CleanMode`: 清洁模式功能骨架
-- `Sources/Core/Permissions`: 系统权限检查与请求
-- `Sources/Core/Utils`: 共享工具位
-- `Sources/Resources`: 资源目录，当前包含空的 `Assets.xcassets`
-- `Configs`: 受版本控制的构建配置
+- 菜单栏常驻：应用运行后驻留在菜单栏中，默认不出现在 Dock，适合随用随开。
+- 物理清洁模式：可以一键进入全屏黑色覆盖界面，临时拦截键盘和鼠标输入，方便擦拭屏幕和键盘。
+- 多屏覆盖：进入清洁模式时会覆盖所有已连接屏幕，保持统一的纯黑清洁界面。
+- 退出快捷键提示：清洁模式右下角会显示当前退出快捷键水印，既能看清，又尽量不影响清洁操作。
+- 防空闲锁屏：进入清洁模式时会尽量阻止因空闲触发的锁屏或显示器休眠，减少清洁过程中被系统打断。
+- 自动恢复：如果系统仍然发生锁屏、切出会话或睡眠，清洁模式会自动退出，并恢复输入与界面状态。
+- 快捷键设置：支持为功能动作配置快捷键，编辑后立即生效；必要快捷键支持重置但不能删除。
+- 原生 macOS 体验：基于 SwiftUI 和 AppKit 实现，界面和交互保持接近系统原生风格。
 
-## Quick Start
+## 开发、构建与发布
 
-1. 确保本机已安装 Xcode 和 `xcodegen`
-2. 运行 `make setup`
-3. 打开 `LocalConfig.xcconfig`，填写 `DEVELOPMENT_TEAM` 和 `BUNDLE_IDENTIFIER_PREFIX`
-4. 运行 `make run`
-
-## Commands
-
-- `make setup`: 初始化 `LocalConfig.xcconfig`、Git 仓库；如传入 `REMOTE_URL=...` 会顺手配置远端
-- `make generate`: 生成 `MacTools.xcodeproj`
-- `make build`: 终端静默编译 Debug App
-- `make run`: 生成、编译并启动 App
-- `make clean`: 清理构建产物和生成工程
-- `make release-local ARGS="--version 0.1.0 --skip-sign"`: 运行本地发布脚本
-
-## Manual Git Bootstrap
-
-```sh
-git init
-git branch -M main
-git remote add origin git@github.com:owner/MacTools.git
-```
-
-## Notes
-
-- 工程使用 XcodeGen 的 `project.yml` 作为唯一工程描述来源，生成的 `.xcodeproj` 不进入 Git。
-- App 通过生成的 Info.plist 注入 `LSUIElement = YES`，启动后只显示在菜单栏，不显示在 Dock。
-- Clean Mode 当前只实现状态与权限骨架，不会真正执行黑屏或键盘锁定。
-- `PRODUCT_BUNDLE_IDENTIFIER` 由 `LocalConfig.xcconfig` 中的 `BUNDLE_IDENTIFIER_PREFIX` 拼出，默认示例是 `com.example.mactools`。
-
-如果你想在初始化时就顺手配置远端，可以直接执行：
-
-```sh
-make setup REMOTE_URL=git@github.com:yourname/MacTools.git
-```
-
-## Local Release
-
-1. 复制 `scripts/release.local.env.sample` 为 `scripts/release.local.env`
-2. 填写 `DEVELOPER_ID_APPLICATION`
-   这里必须填钥匙串里完整的 `Developer ID Application` 证书名称，不是 Team ID。可以先执行：
-
-```sh
-security find-identity -v -p codesigning
-```
-
-   然后把类似下面这一整段填进 `scripts/release.local.env`：
-
-```sh
-DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)"
-```
-
-3. 可选：如果你想自定义 DMG 的签名 identifier，可以补一个 `DMG_SIGNING_IDENTIFIER`
-
-```sh
-DMG_SIGNING_IDENTIFIER="com.example.mactools.disk-image"
-```
-
-默认会从 `.app` 的 `CFBundleIdentifier` 自动派生为 `<bundle-id>.disk-image`。
-
-4. 如果要公证，先执行一次：
+1. 安装 Xcode 和 `xcodegen`，然后执行 `make setup`。
+2. 打开 `LocalConfig.xcconfig`，填写 `DEVELOPMENT_TEAM` 和 `BUNDLE_IDENTIFIER_PREFIX`。
+3. 本地开发直接运行 `make run` 即可；如果只想编译一次，用 `make build`。
+4. 本地发布前，先复制 `scripts/release.local.env.sample` 为 `scripts/release.local.env`，至少填写 `DEVELOPER_ID_APPLICATION`。
+5. 如果需要 Apple 公证，只需要先执行一次下面这条命令保存 notary 凭证，后续直接跑发布脚本即可：
 
 ```sh
 xcrun notarytool store-credentials "MacTools-Notary" \
@@ -81,44 +28,17 @@ xcrun notarytool store-credentials "MacTools-Notary" \
   --password "app-specific-password"
 ```
 
-5. 运行本地正式包脚本：
+6. 生成本地正式包：
 
 ```sh
 ./scripts/release-local.sh --version 0.1.0
 ```
 
-脚本现在的正式流程是：
-
-- 无签名构建 `MacTools.app`
-- 用 `Developer ID Application` 签 `MacTools.app`
-- 创建 `MacTools.dmg`
-- 用 `Developer ID Application` 再签 `MacTools.dmg`
-- 提交 Apple 公证
-- `staple` 公证票据
-- 用 `spctl` 验证最终 DMG 是否被 Gatekeeper 接受
-
-6. 如果只想先验证打包链路，不签名不公证：
-
-```sh
-./scripts/release-local.sh --version 0.1.0 --skip-sign
-```
-
-7. 如果要把 DMG 同步到 GitHub Release：
+7. 如果还要同步到 GitHub Release，登录 `gh` 后执行：
 
 ```sh
 gh auth login
 ./scripts/release-local.sh --version 0.1.0 --publish
 ```
 
-`--publish` 会确保工作区干净、创建或复用 `v0.1.0` 标签、推送标签到 `origin`，然后把 `MacTools.dmg` 同步到 GitHub Release。
-
-最常用的正式发布顺序就是直接一次跑完：
-
-```sh
-gh auth login
-./scripts/release-local.sh --version 0.1.0 --publish
-```
-
-这样会按“构建 -> 签 `.app` -> 创建并签 `DMG` -> 公证 -> staple -> Gatekeeper 验证 -> 上传 GitHub Release”的顺序完整执行。
-
-更多参数和发布说明见 `./scripts/release-local.sh --help`。
+更多参数可以查看 `./scripts/release-local.sh --help`。

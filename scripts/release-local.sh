@@ -15,6 +15,7 @@ BUILD_NUMBER=""
 TAG=""
 NOTES_FILE=""
 PUBLISH=0
+PUBLISH_EXISTING=0
 SKIP_BUILD=0
 SKIP_SIGN=0
 SKIP_NOTARIZE=0
@@ -36,6 +37,7 @@ Options:
   --tag <tag>                Git tag / release tag. Defaults to v<version>.
   --notes-file <path>        Release notes file for GitHub Release upload.
   --publish                  Push the tag and sync the DMG to GitHub Releases.
+  --publish-existing         Upload the existing DMG artifact without rebuilding.
   --skip-build               Reuse the existing Release app in build/DerivedData.
   --skip-sign                Skip Developer ID signing. Implies --skip-notarize.
   --skip-notarize            Skip notarization and stapling.
@@ -72,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --publish)
       PUBLISH=1
+      shift
+      ;;
+    --publish-existing)
+      PUBLISH_EXISTING=1
       shift
       ;;
     --skip-build)
@@ -335,6 +341,16 @@ $assessment_output"
   printf '%s\n' "$assessment_output"
 }
 
+function require_existing_dmg() {
+  local dmg_path="$1"
+  [[ -f "$dmg_path" ]] || fail "未找到现有 DMG：$dmg_path
+
+如果你想先构建并公证新包，请直接运行：
+  ./scripts/release-local.sh --version ${VERSION:-0.1.0}
+
+如果你已经做过一次完整发布，请确认要上传的 DMG 仍在上面的路径。"
+}
+
 function publish_release() {
   local dmg_path="$1"
   local repository
@@ -377,6 +393,9 @@ NOTES_FILE="${NOTES_FILE:-${GITHUB_RELEASE_NOTES_FILE:-}}"
 if [[ -n "$NOTES_FILE" && ! -f "$NOTES_FILE" ]]; then
   fail "Release notes 文件不存在：$NOTES_FILE"
 fi
+if [[ "$PUBLISH" -eq 1 && "$PUBLISH_EXISTING" -eq 1 ]]; then
+  fail "--publish 和 --publish-existing 不能同时使用。"
+fi
 
 ARTIFACT_DIR="$ROOT_DIR/build/release/$TAG"
 DERIVED_DATA="$ROOT_DIR/build/DerivedData"
@@ -387,39 +406,44 @@ DMG_IDENTIFIER=""
 
 mkdir -p "$ARTIFACT_DIR"
 
-if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  build_release_app
-fi
-
-[[ -d "$APP_PATH" ]] || fail "未找到 Release app：$APP_PATH"
-
-info "Preparing artifact directory $ARTIFACT_DIR"
-rm -rf "$SIGNED_APP_PATH" "$DMG_PATH"
-ditto "$APP_PATH" "$SIGNED_APP_PATH"
-
-if [[ "$SKIP_SIGN" -eq 0 ]]; then
-  [[ -n "${DEVELOPER_ID_APPLICATION:-}" ]] || fail "缺少 DEVELOPER_ID_APPLICATION，无法做正式签名。"
-  require_release_signing_identity
-  info "Signing app with Developer ID"
-  sign_app_bundle "$SIGNED_APP_PATH"
-  DMG_IDENTIFIER="$(dmg_signing_identifier "$SIGNED_APP_PATH")"
-else
-  info "Skipping code signing"
-fi
-
-create_dmg "$SIGNED_APP_PATH" "$DMG_PATH"
-
-if [[ "$SKIP_SIGN" -eq 0 ]]; then
-  info "Signing DMG with Developer ID identifier=$DMG_IDENTIFIER"
-  sign_disk_image "$DMG_PATH" "$DMG_IDENTIFIER"
-fi
-
-if [[ "$SKIP_NOTARIZE" -eq 0 ]]; then
-  require_command xcrun
-  notarize_dmg "$DMG_PATH"
+if [[ "$PUBLISH_EXISTING" -eq 1 ]]; then
+  require_existing_dmg "$DMG_PATH"
   validate_notarized_dmg "$DMG_PATH"
 else
-  info "Skipping notarization"
+  if [[ "$SKIP_BUILD" -eq 0 ]]; then
+    build_release_app
+  fi
+
+  [[ -d "$APP_PATH" ]] || fail "未找到 Release app：$APP_PATH"
+
+  info "Preparing artifact directory $ARTIFACT_DIR"
+  rm -rf "$SIGNED_APP_PATH" "$DMG_PATH"
+  ditto "$APP_PATH" "$SIGNED_APP_PATH"
+
+  if [[ "$SKIP_SIGN" -eq 0 ]]; then
+    [[ -n "${DEVELOPER_ID_APPLICATION:-}" ]] || fail "缺少 DEVELOPER_ID_APPLICATION，无法做正式签名。"
+    require_release_signing_identity
+    info "Signing app with Developer ID"
+    sign_app_bundle "$SIGNED_APP_PATH"
+    DMG_IDENTIFIER="$(dmg_signing_identifier "$SIGNED_APP_PATH")"
+  else
+    info "Skipping code signing"
+  fi
+
+  create_dmg "$SIGNED_APP_PATH" "$DMG_PATH"
+
+  if [[ "$SKIP_SIGN" -eq 0 ]]; then
+    info "Signing DMG with Developer ID identifier=$DMG_IDENTIFIER"
+    sign_disk_image "$DMG_PATH" "$DMG_IDENTIFIER"
+  fi
+
+  if [[ "$SKIP_NOTARIZE" -eq 0 ]]; then
+    require_command xcrun
+    notarize_dmg "$DMG_PATH"
+    validate_notarized_dmg "$DMG_PATH"
+  else
+    info "Skipping notarization"
+  fi
 fi
 
 DMG_SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
@@ -427,6 +451,10 @@ info "DMG ready: $DMG_PATH"
 info "SHA256: $DMG_SHA256"
 
 if [[ "$PUBLISH" -eq 1 ]]; then
+  publish_release "$DMG_PATH"
+fi
+
+if [[ "$PUBLISH_EXISTING" -eq 1 ]]; then
   publish_release "$DMG_PATH"
 fi
 
