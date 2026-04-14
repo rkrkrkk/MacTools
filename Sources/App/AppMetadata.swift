@@ -11,11 +11,11 @@ enum AppMetadata {
     }
 
     static var shortVersion: String {
-        bundleString("CFBundleShortVersionString") ?? "0.2.0"
+        bundleString("CFBundleShortVersionString") ?? "0.3.0"
     }
 
     static var buildNumber: String {
-        bundleString(kCFBundleVersionKey as String) ?? "2"
+        bundleString(kCFBundleVersionKey as String) ?? "3"
     }
 
     static var versionDescription: String {
