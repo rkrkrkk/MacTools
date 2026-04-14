@@ -575,13 +575,18 @@ info "SHA256: $DMG_SHA256"
 
 if [[ "$PUBLISH" -eq 1 ]]; then
   publish_release "$DMG_PATH"
+  write_appcast "$DMG_PATH"
+  info "Appcast updated after GitHub Release publish: $APPCAST_PATH"
 fi
 
 if [[ "$PUBLISH_EXISTING" -eq 1 ]]; then
   publish_release "$DMG_PATH"
+  write_appcast "$DMG_PATH"
+  info "Appcast updated after existing artifact publish: $APPCAST_PATH"
 fi
 
-write_appcast "$DMG_PATH"
-info "如果你使用 GitHub Pages 托管 appcast，请记得提交并推送 docs/appcast.xml。"
+if [[ "$PUBLISH" -eq 0 && "$PUBLISH_EXISTING" -eq 0 ]]; then
+  info "Skipping appcast update because this run did not publish a GitHub Release."
+fi
 
 info "Done"
