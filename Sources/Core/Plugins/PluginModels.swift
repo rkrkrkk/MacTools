@@ -3,12 +3,19 @@ import SwiftUI
 
 enum PluginControlStyle {
     case `switch`
+    case disclosure
 }
 
 enum PluginPanelAction {
     case setSwitch(Bool)
+    case setDisclosureExpanded(Bool)
     case setSelection(controlID: String, optionID: String)
     case setDate(controlID: String, value: Date)
+}
+
+enum PluginPanelDescriptionTone {
+    case secondary
+    case error
 }
 
 enum PluginMenuActionBehavior {
@@ -46,6 +53,7 @@ struct PluginManifest: Identifiable {
 struct PluginPanelState {
     let subtitle: String
     let isOn: Bool
+    let isExpanded: Bool
     let isEnabled: Bool
     let isVisible: Bool
     let detail: PluginPanelDetail?
@@ -120,7 +128,9 @@ struct PluginPanelItem: Identifiable {
     let menuActionBehavior: PluginMenuActionBehavior
     let description: String
     let helpText: String
+    let descriptionTone: PluginPanelDescriptionTone
     let isOn: Bool
+    let isExpanded: Bool
     let isEnabled: Bool
     let detail: PluginPanelDetail?
 }

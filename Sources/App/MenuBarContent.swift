@@ -31,6 +31,9 @@ struct MenuBarContent: View {
                                 handlePanelSwitchChange(newValue, for: item)
                             }
                         ),
+                        onDisclosureToggle: { isExpanded in
+                            pluginHost.setDisclosureExpanded(isExpanded, for: item.id)
+                        },
                         onSelectionChange: { controlID, optionID in
                             pluginHost.setPanelSelectionValue(
                                 optionID,
@@ -129,47 +132,26 @@ struct MenuBarContent: View {
 struct FeatureRowView: View {
     let item: PluginPanelItem
     @Binding var isOn: Bool
+    let onDisclosureToggle: (Bool) -> Void
     let onSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: item.detail == nil ? 0 : 12) {
-            HStack(alignment: .center, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(item.iconTint.opacity(0.14))
-
-                    Image(systemName: item.iconName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(item.iconTint)
+            switch item.controlStyle {
+            case .switch:
+                rowHeader
+            case .disclosure:
+                Button {
+                    onDisclosureToggle(!item.isExpanded)
+                } label: {
+                    rowHeader
                 }
-                .frame(width: FeatureRowLayout.iconSize, height: FeatureRowLayout.iconSize)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-
-                    Text(item.description)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(item.helpText)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                switch item.controlStyle {
-                case .switch:
-                    Toggle(String(), isOn: $isOn)
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .toggleStyle(.switch)
-                        .disabled(!item.isEnabled)
-                }
+                .buttonStyle(.plain)
+                .disabled(!item.isEnabled)
             }
 
-            if let detail = item.detail {
+            if let detail = detailToDisplay {
                 PluginPanelDetailView(
                     detail: detail,
                     onSelectionChange: onSelectionChange,
@@ -186,6 +168,60 @@ struct FeatureRowView: View {
         )
         .contentShape(Rectangle())
         .help(item.helpText)
+    }
+
+    private var rowHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(item.iconTint.opacity(0.14))
+
+                Image(systemName: item.iconName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(item.iconTint)
+            }
+            .frame(width: FeatureRowLayout.iconSize, height: FeatureRowLayout.iconSize)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+
+                Text(item.description)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(item.descriptionTone == .error ? Color.red : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(item.helpText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            switch item.controlStyle {
+            case .switch:
+                Toggle(String(), isOn: $isOn)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .toggleStyle(.switch)
+                    .disabled(!item.isEnabled)
+            case .disclosure:
+                Image(systemName: item.isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+    }
+
+    private var detailToDisplay: PluginPanelDetail? {
+        guard let detail = item.detail else {
+            return nil
+        }
+
+        if item.controlStyle == .disclosure && !item.isExpanded {
+            return nil
+        }
+
+        return detail
     }
 }
 

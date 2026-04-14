@@ -98,6 +98,15 @@ final class PluginHost: ObservableObject {
         rebuildDerivedState()
     }
 
+    func setDisclosureExpanded(_ isExpanded: Bool, for pluginID: String) {
+        guard let plugin = plugin(for: pluginID) else {
+            return
+        }
+
+        plugin.handlePanelAction(.setDisclosureExpanded(isExpanded))
+        rebuildDerivedState()
+    }
+
     func setPanelSelectionValue(
         _ optionID: String,
         controlID: String,
@@ -275,7 +284,6 @@ final class PluginHost: ObservableObject {
             }
 
             let description = state.errorMessage ?? state.subtitle
-            let helpText = description.isEmpty ? manifest.defaultDescription : description
 
             return PluginPanelItem(
                 id: manifest.id,
@@ -285,8 +293,10 @@ final class PluginHost: ObservableObject {
                 controlStyle: manifest.controlStyle,
                 menuActionBehavior: manifest.menuActionBehavior,
                 description: description.isEmpty ? manifest.defaultDescription : description,
-                helpText: helpText,
+                helpText: description.isEmpty ? manifest.defaultDescription : description,
+                descriptionTone: state.errorMessage == nil ? .secondary : .error,
                 isOn: state.isOn,
+                isExpanded: state.isExpanded,
                 isEnabled: state.isEnabled,
                 detail: state.detail
             )

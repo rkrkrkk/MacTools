@@ -51,6 +51,7 @@ final class KeepAwakePlugin: FeaturePlugin {
         PluginPanelState(
             subtitle: panelSubtitle,
             isOn: session != nil,
+            isExpanded: false,
             isEnabled: true,
             isVisible: true,
             detail: panelDetail,
@@ -70,6 +71,8 @@ final class KeepAwakePlugin: FeaturePlugin {
         switch action {
         case let .setSwitch(isEnabled):
             setKeepAwakeEnabled(isEnabled)
+        case .setDisclosureExpanded:
+            return
         case let .setSelection(controlID, optionID):
             guard controlID == ControlID.duration else {
                 return
