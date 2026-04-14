@@ -1,0 +1,4 @@
+#include? "../LocalConfig.xcconfig"
+
+SWIFT_STRICT_CONCURRENCY = complete
+

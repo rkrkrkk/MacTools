@@ -1,0 +1,68 @@
+import Foundation
+
+@MainActor
+final class ShortcutStore {
+    private enum DefaultsKey {
+        static let prefix = "shortcut.customization."
+    }
+
+    private let userDefaults: UserDefaults
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
+
+    func customization(for shortcutID: String) -> ShortcutCustomization {
+        let key = storageKey(for: shortcutID)
+
+        guard let data = userDefaults.data(forKey: key) else {
+            return .inheritDefault
+        }
+
+        do {
+            return try decoder.decode(ShortcutCustomization.self, from: data)
+        } catch {
+            userDefaults.removeObject(forKey: key)
+            return .inheritDefault
+        }
+    }
+
+    func setCustomization(_ customization: ShortcutCustomization, for shortcutID: String) {
+        let key = storageKey(for: shortcutID)
+
+        switch customization {
+        case .inheritDefault:
+            userDefaults.removeObject(forKey: key)
+        case .custom, .cleared:
+            guard let data = try? encoder.encode(customization) else {
+                return
+            }
+
+            userDefaults.set(data, forKey: key)
+        }
+    }
+
+    func resolvedBinding(for shortcutID: String, default defaultBinding: ShortcutBinding?) -> ShortcutBinding? {
+        ShortcutStore.resolve(
+            customization: customization(for: shortcutID),
+            defaultBinding: defaultBinding
+        )
+    }
+
+    static func resolve(customization: ShortcutCustomization, defaultBinding: ShortcutBinding?) -> ShortcutBinding? {
+        switch customization {
+        case .inheritDefault:
+            return defaultBinding
+        case let .custom(binding):
+            return binding
+        case .cleared:
+            return nil
+        }
+    }
+
+    private func storageKey(for shortcutID: String) -> String {
+        DefaultsKey.prefix + shortcutID
+    }
+}

@@ -1,0 +1,381 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$ROOT_DIR/scripts"
+PROJECT_SPEC="$ROOT_DIR/project.yml"
+PROJECT_FILE="$ROOT_DIR/MacTools.xcodeproj"
+APP_NAME="MacTools"
+SCHEME="MacTools"
+CONFIG_FILE="${RELEASE_CONFIG_FILE:-$SCRIPT_DIR/release.local.env}"
+
+VERSION=""
+BUILD_NUMBER=""
+TAG=""
+NOTES_FILE=""
+PUBLISH=0
+SKIP_BUILD=0
+SKIP_SIGN=0
+SKIP_NOTARIZE=0
+FORCE=0
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+function usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/release-local.sh [options]
+
+Options:
+  --version <version>        Release marketing version. Defaults to project.yml.
+  --build-number <number>    Release build number. Defaults to project.yml.
+  --tag <tag>                Git tag / release tag. Defaults to v<version>.
+  --notes-file <path>        Release notes file for GitHub Release upload.
+  --publish                  Push the tag and sync the DMG to GitHub Releases.
+  --skip-build               Reuse the existing Release app in build/DerivedData.
+  --skip-sign                Skip Developer ID signing. Implies --skip-notarize.
+  --skip-notarize            Skip notarization and stapling.
+  --force                    Recreate the local tag if it already points elsewhere.
+  -h, --help                 Show this help message.
+
+Environment:
+  Copy scripts/release.local.env.sample to scripts/release.local.env
+  and set:
+    DEVELOPER_ID_APPLICATION
+    APPLE_NOTARY_PROFILE
+    GITHUB_REPOSITORY
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version)
+      VERSION="${2:-}"
+      shift 2
+      ;;
+    --build-number)
+      BUILD_NUMBER="${2:-}"
+      shift 2
+      ;;
+    --tag)
+      TAG="${2:-}"
+      shift 2
+      ;;
+    --notes-file)
+      NOTES_FILE="${2:-}"
+      shift 2
+      ;;
+    --publish)
+      PUBLISH=1
+      shift
+      ;;
+    --skip-build)
+      SKIP_BUILD=1
+      shift
+      ;;
+    --skip-sign)
+      SKIP_SIGN=1
+      SKIP_NOTARIZE=1
+      shift
+      ;;
+    --skip-notarize)
+      SKIP_NOTARIZE=1
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+function info() {
+  printf '[release] %s\n' "$1"
+}
+
+function fail() {
+  printf '[release] error: %s\n' "$1" >&2
+  exit 1
+}
+
+function require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+}
+
+function available_code_signing_identities() {
+  security find-identity -v -p codesigning 2>/dev/null || true
+}
+
+function require_release_signing_identity() {
+  local identities matched_identity
+
+  identities="$(available_code_signing_identities)"
+  [[ -n "$identities" ]] || fail "当前钥匙串里没有可用的代码签名身份。"
+
+  matched_identity="$(printf '%s\n' "$identities" | grep -F "\"$DEVELOPER_ID_APPLICATION\"" || true)"
+
+  if [[ -z "$matched_identity" ]]; then
+    fail "未找到签名身份 \"$DEVELOPER_ID_APPLICATION\"。
+
+请在 scripts/release.local.env 中把 DEVELOPER_ID_APPLICATION 设置为钥匙串里的完整证书名称，例如：
+  DEVELOPER_ID_APPLICATION=\"Developer ID Application: Your Name (TEAMID)\"
+
+当前可见的代码签名身份：
+$identities"
+  fi
+
+  if [[ "$matched_identity" != *"Developer ID Application:"* ]]; then
+    fail "当前匹配到的签名身份不是 Developer ID Application 证书：
+$matched_identity
+
+本脚本用于外部正式分发，必须使用 Developer ID Application 证书，而不是 Apple Development 证书。"
+  fi
+}
+
+function read_project_setting() {
+  local key="$1"
+  awk -v key="$key" '$1 == key ":" { print $2; exit }' "$PROJECT_SPEC"
+}
+
+function git_repository() {
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    printf '%s\n' "$GITHUB_REPOSITORY"
+    return 0
+  fi
+
+  local remote_url
+  remote_url="$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null || true)"
+
+  case "$remote_url" in
+    git@github.com:*)
+      remote_url="${remote_url#git@github.com:}"
+      printf '%s\n' "${remote_url%.git}"
+      ;;
+    https://github.com/*)
+      remote_url="${remote_url#https://github.com/}"
+      printf '%s\n' "${remote_url%.git}"
+      ;;
+    ssh://git@github.com/*)
+      remote_url="${remote_url#ssh://git@github.com/}"
+      printf '%s\n' "${remote_url%.git}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+function ensure_clean_git() {
+  local status
+  status="$(git -C "$ROOT_DIR" status --porcelain)"
+  [[ -z "$status" ]] || fail "Git 工作区必须干净后才能 --publish。"
+}
+
+function ensure_tag_ready() {
+  local head_commit existing_commit
+  head_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+
+  if git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+    existing_commit="$(git -C "$ROOT_DIR" rev-list -n 1 "$TAG")"
+    if [[ "$existing_commit" != "$head_commit" ]]; then
+      [[ "$FORCE" -eq 1 ]] || fail "标签 $TAG 已存在且不指向当前提交，添加 --force 才会重建。"
+      git -C "$ROOT_DIR" tag -d "$TAG" >/dev/null
+    fi
+  fi
+
+  if ! git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+    git -C "$ROOT_DIR" tag -a "$TAG" -m "Release $TAG"
+  fi
+
+  if [[ "$FORCE" -eq 1 ]]; then
+    git -C "$ROOT_DIR" push --force origin "refs/tags/$TAG"
+  else
+    git -C "$ROOT_DIR" push origin "refs/tags/$TAG"
+  fi
+}
+
+function sign_path() {
+  local path="$1"
+  /usr/bin/codesign \
+    --force \
+    --sign "$DEVELOPER_ID_APPLICATION" \
+    --options runtime \
+    --timestamp \
+    "$path"
+}
+
+function sign_app_bundle() {
+  local app_path="$1"
+
+  if [[ -d "$app_path/Contents" ]]; then
+    while IFS= read -r binary; do
+      [[ -n "$binary" ]] || continue
+      sign_path "$binary"
+    done < <(find "$app_path/Contents" -type f \( -name "*.dylib" -o -name "*.so" \) -print)
+
+    while IFS= read -r bundle; do
+      [[ -n "$bundle" ]] || continue
+      sign_path "$bundle"
+    done < <(find "$app_path/Contents" -depth -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print)
+  fi
+
+  sign_path "$app_path"
+  /usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path"
+}
+
+function build_release_app() {
+  require_command xcodegen
+  require_command xcodebuild
+
+  info "Generating Xcode project"
+  (cd "$ROOT_DIR" && xcodegen generate >/dev/null)
+
+  info "Building Release app version=$VERSION build=$BUILD_NUMBER"
+  xcodebuild \
+    -project "$PROJECT_FILE" \
+    -scheme "$SCHEME" \
+    -configuration Release \
+    -destination "generic/platform=macOS" \
+    -derivedDataPath "$DERIVED_DATA" \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY= \
+    build \
+    -quiet
+}
+
+function create_dmg() {
+  local app_path="$1"
+  local dmg_path="$2"
+  local volume_name="${DMG_VOLUME_NAME:-$APP_NAME}"
+  local stage_dir
+  stage_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mactools-release-dmg.XXXXXX")"
+
+  ditto "$app_path" "$stage_dir/$APP_NAME.app"
+  ln -s /Applications "$stage_dir/Applications"
+
+  info "Creating DMG at $dmg_path"
+  hdiutil create \
+    -volname "$volume_name" \
+    -srcfolder "$stage_dir" \
+    -ov \
+    -format UDZO \
+    "$dmg_path" >/dev/null
+
+  /bin/rm -rf "$stage_dir"
+}
+
+function notarize_dmg() {
+  local dmg_path="$1"
+  [[ -n "${APPLE_NOTARY_PROFILE:-}" ]] || fail "缺少 APPLE_NOTARY_PROFILE，无法公证。"
+
+  info "Submitting DMG for notarization"
+  xcrun notarytool submit "$dmg_path" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait
+
+  info "Stapling notarization ticket"
+  xcrun stapler staple -v "$dmg_path"
+}
+
+function publish_release() {
+  local dmg_path="$1"
+  local repository
+  repository="$(git_repository)" || fail "无法推断 GitHub 仓库，请在 scripts/release.local.env 中设置 GITHUB_REPOSITORY。"
+
+  require_command gh
+  gh auth status >/dev/null 2>&1 || fail "gh 尚未登录，请先运行 gh auth login。"
+  ensure_clean_git
+  ensure_tag_ready
+
+  info "Syncing asset to GitHub Release $TAG ($repository)"
+
+  if gh release view "$TAG" --repo "$repository" >/dev/null 2>&1; then
+    gh release upload "$TAG" "$dmg_path" --repo "$repository" --clobber
+    if [[ -n "$NOTES_FILE" ]]; then
+      gh release edit "$TAG" --repo "$repository" --title "$APP_NAME $VERSION" --notes-file "$NOTES_FILE"
+    fi
+  else
+    if [[ -n "$NOTES_FILE" ]]; then
+      gh release create "$TAG" "$dmg_path" --repo "$repository" --title "$APP_NAME $VERSION" --notes-file "$NOTES_FILE"
+    else
+      gh release create "$TAG" "$dmg_path" --repo "$repository" --title "$APP_NAME $VERSION" --generate-notes
+    fi
+  fi
+}
+
+require_command ditto
+require_command hdiutil
+require_command shasum
+require_command codesign
+require_command git
+
+VERSION="${VERSION:-$(read_project_setting MARKETING_VERSION)}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(read_project_setting CURRENT_PROJECT_VERSION)}"
+TAG="${TAG:-v$VERSION}"
+NOTES_FILE="${NOTES_FILE:-${GITHUB_RELEASE_NOTES_FILE:-}}"
+
+[[ -n "$VERSION" ]] || fail "无法从 project.yml 读取 MARKETING_VERSION。"
+[[ -n "$BUILD_NUMBER" ]] || fail "无法从 project.yml 读取 CURRENT_PROJECT_VERSION。"
+if [[ -n "$NOTES_FILE" && ! -f "$NOTES_FILE" ]]; then
+  fail "Release notes 文件不存在：$NOTES_FILE"
+fi
+
+ARTIFACT_DIR="$ROOT_DIR/build/release/$TAG"
+DERIVED_DATA="$ROOT_DIR/build/DerivedData"
+APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
+SIGNED_APP_PATH="$ARTIFACT_DIR/$APP_NAME.app"
+DMG_PATH="$ARTIFACT_DIR/$APP_NAME.dmg"
+
+mkdir -p "$ARTIFACT_DIR"
+
+if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  build_release_app
+fi
+
+[[ -d "$APP_PATH" ]] || fail "未找到 Release app：$APP_PATH"
+
+info "Preparing artifact directory $ARTIFACT_DIR"
+rm -rf "$SIGNED_APP_PATH" "$DMG_PATH"
+ditto "$APP_PATH" "$SIGNED_APP_PATH"
+
+if [[ "$SKIP_SIGN" -eq 0 ]]; then
+  [[ -n "${DEVELOPER_ID_APPLICATION:-}" ]] || fail "缺少 DEVELOPER_ID_APPLICATION，无法做正式签名。"
+  require_release_signing_identity
+  info "Signing app with Developer ID"
+  sign_app_bundle "$SIGNED_APP_PATH"
+else
+  info "Skipping code signing"
+fi
+
+create_dmg "$SIGNED_APP_PATH" "$DMG_PATH"
+
+if [[ "$SKIP_NOTARIZE" -eq 0 ]]; then
+  require_command xcrun
+  notarize_dmg "$DMG_PATH"
+else
+  info "Skipping notarization"
+fi
+
+DMG_SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+info "DMG ready: $DMG_PATH"
+info "SHA256: $DMG_SHA256"
+
+if [[ "$PUBLISH" -eq 1 ]]; then
+  publish_release "$DMG_PATH"
+fi
+
+info "Done"

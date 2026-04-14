@@ -1,0 +1,12 @@
+MacTools.xcodeproj
+MacTools.xcworkspace
+LocalConfig.xcconfig
+scripts/release.local.env
+build/
+.build/
+.DS_Store
+
+xcuserdata/
+*.xcuserdatad
+*.xcuserstate
+*.pbxuser
