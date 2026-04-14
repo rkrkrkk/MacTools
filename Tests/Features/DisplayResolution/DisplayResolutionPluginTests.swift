@@ -57,6 +57,24 @@ final class DisplayResolutionPluginTests: XCTestCase {
         XCTAssertEqual(DisplayResolutionPlugin.visibleModes([]), [])
     }
 
+    func testDedupeModesPreservesCurrentModeOverHigherRefreshDuplicate() {
+        let modes = [
+            makeMode(modeId: 40, width: 1512, height: 982, refreshRate: 60, isCurrent: true),
+            makeMode(modeId: 41, width: 1512, height: 982, refreshRate: 120)
+        ]
+
+        XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [40])
+    }
+
+    func testDedupeModesPrefersHigherRefreshWhenNeitherDuplicateIsCurrent() {
+        let modes = [
+            makeMode(modeId: 50, width: 1512, height: 982, refreshRate: 60),
+            makeMode(modeId: 51, width: 1512, height: 982, refreshRate: 120)
+        ]
+
+        XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [51])
+    }
+
     func testDisplayResolutionInfoEquatableByModeId() {
         XCTAssertEqual(
             makeMode(modeId: 99, width: 3008, height: 1692),

@@ -44,26 +44,7 @@ final class DisplayResolutionController {
             return mode.isUsableForDesktopGUI() && flags & DisplayModeFlags.safe != 0 && flags & DisplayModeFlags.notPreset == 0
         }
 
-        var bestByKey: [String: CGDisplayMode] = [:]
-        for mode in candidates {
-            let flags = mode.ioFlags
-            let tag: String
-            if flags & DisplayModeFlags.native != 0 {
-                tag = "native"
-            } else if flags & DisplayModeFlags.default != 0 {
-                tag = "default"
-            } else {
-                tag = "scaled"
-            }
-
-            let key = "\(tag):\(mode.width)x\(mode.height)"
-            if let existing = bestByKey[key], existing.refreshRate >= mode.refreshRate {
-                continue
-            }
-            bestByKey[key] = mode
-        }
-
-        return bestByKey.values.map { mode in
+        let infos = candidates.map { mode in
             let flags = mode.ioFlags
             return DisplayResolutionInfo(
                 modeId: mode.ioDisplayModeID,
@@ -78,9 +59,26 @@ final class DisplayResolutionController {
                 isCurrent: mode.ioDisplayModeID == currentID
             )
         }
+        return Self.deduplicateModes(infos)
         .sorted {
             $0.pixelWidth != $1.pixelWidth ? $0.pixelWidth > $1.pixelWidth : $0.width > $1.width
         }
+    }
+
+    nonisolated static func deduplicateModes(_ modes: [DisplayResolutionInfo]) -> [DisplayResolutionInfo] {
+        var bestByKey: [String: DisplayResolutionInfo] = [:]
+
+        for mode in modes {
+            let key = deduplicationKey(for: mode)
+
+            if let existing = bestByKey[key] {
+                bestByKey[key] = preferredMode(existing: existing, candidate: mode)
+            } else {
+                bestByKey[key] = mode
+            }
+        }
+
+        return Array(bestByKey.values)
     }
 
     @discardableResult
@@ -118,5 +116,29 @@ final class DisplayResolutionController {
             return nil
         }
         return modes.first(where: { $0.ioDisplayModeID == modeId })
+    }
+
+    nonisolated private static func deduplicationKey(for mode: DisplayResolutionInfo) -> String {
+        let tag: String
+        if mode.isNative {
+            tag = "native"
+        } else if mode.isDefault {
+            tag = "default"
+        } else {
+            tag = "scaled"
+        }
+
+        return "\(tag):\(mode.width)x\(mode.height)"
+    }
+
+    nonisolated private static func preferredMode(
+        existing: DisplayResolutionInfo,
+        candidate: DisplayResolutionInfo
+    ) -> DisplayResolutionInfo {
+        if existing.isCurrent != candidate.isCurrent {
+            return existing.isCurrent ? existing : candidate
+        }
+
+        return existing.refreshRate >= candidate.refreshRate ? existing : candidate
     }
 }
