@@ -4,6 +4,10 @@ options:
 configs:
   Debug: debug
   Release: release
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.8.1
 targets:
   MacTools:
     type: application
@@ -16,6 +20,8 @@ targets:
       - path: Sources
         excludes:
           - "**/.gitkeep"
+    dependencies:
+      - package: Sparkle
     settings:
       base:
         PRODUCT_NAME: MacTools
@@ -27,5 +33,37 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Configs/MacTools-Info.plist
+        SPARKLE_PUBLIC_ED_KEY: YS4ioWunyQC5rP/YQdDbG9panyqCKNyBd0iPTUqIFY0=
+
+  MacToolsTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests/MacToolsTests
+    dependencies:
+      - target: MacTools
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_IDENTIFIER_PREFIX).mactoolsTests
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_LSUIElement: YES
+
+schemes:
+  MacTools:
+    build:
+      targets:
+        MacTools: all
+        MacToolsTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: MacToolsTests
+          parallelizable: true
+    profile:
+      config: Release
+    archive:
+      config: Release

@@ -30,7 +30,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
         controlStyle: .switch,
         menuActionBehavior: .dismissBeforeHandling,
         order: 100,
-        defaultDescription: "屏幕全黑并临时禁用输入，方便擦拭屏幕和键盘"
+        defaultDescription: "屏幕全黑并临时禁用键盘输入"
     )
 
     var onStateChange: (() -> Void)?

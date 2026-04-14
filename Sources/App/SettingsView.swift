@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var pluginHost: PluginHost
+    @ObservedObject var appUpdater: AppUpdater
 
     var body: some View {
         TabView(selection: $pluginHost.selectedSettingsDestination) {
@@ -18,7 +19,7 @@ struct SettingsView: View {
                     Label("快捷键", systemImage: "keyboard")
                 }
 
-            AboutSettingsView()
+            AboutSettingsView(appUpdater: appUpdater)
                 .tag(SettingsDestination.about)
                 .tabItem {
                     Label("关于", systemImage: "info.circle")
@@ -147,6 +148,14 @@ struct GeneralSettingsView: View {
 }
 
 struct AboutSettingsView: View {
+    @StateObject private var updateViewModel: AboutUpdateViewModel
+
+    init(appUpdater: AppUpdater) {
+        _updateViewModel = StateObject(
+            wrappedValue: AboutUpdateViewModel(updater: appUpdater)
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 28)
@@ -162,20 +171,23 @@ struct AboutSettingsView: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
 
+            AboutUpdateCard(viewModel: updateViewModel)
+                .padding(.top, 28)
+                .frame(maxWidth: 420)
+
             Text(AppMetadata.aboutDescription)
                 .font(.title3)
+                .lineLimit(nil)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 320)
                 .padding(.top, 28)
 
-            VStack(spacing: 8) {
-                Text(AppMetadata.authorDescription)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-
+            VStack(spacing: 0) {
                 Link(AppMetadata.repositoryDisplayName, destination: AppMetadata.repositoryURL)
                     .font(.title3)
             }
+            .frame(maxWidth: .infinity)
             .padding(.top, 28)
 
             Spacer(minLength: 36)
@@ -183,6 +195,47 @@ struct AboutSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 40)
         .padding(.vertical, 28)
+    }
+}
+
+private struct AboutUpdateCard: View {
+    private enum Layout {
+        static let verticalSpacing: CGFloat = 12
+        static let statusMinHeight: CGFloat = 16
+    }
+
+    @ObservedObject var viewModel: AboutUpdateViewModel
+
+    var body: some View {
+        VStack(spacing: Layout.verticalSpacing) {
+            Button(viewModel.primaryButtonTitle) {
+                Task {
+                    await viewModel.performPrimaryAction()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(viewModel.isPrimaryButtonDisabled)
+
+            Text(statusText ?? " ")
+                .font(.footnote)
+                .foregroundStyle(viewModel.statusColor)
+                .lineLimit(nil)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: Layout.statusMinHeight, alignment: .top)
+                .opacity(statusText == nil ? 0 : 1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var statusText: String? {
+        switch viewModel.state {
+        case .idle:
+            return nil
+        default:
+            return viewModel.statusDetail ?? viewModel.statusHeadline
+        }
     }
 }
 

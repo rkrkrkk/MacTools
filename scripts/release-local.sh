@@ -9,6 +9,7 @@ PROJECT_FILE="$ROOT_DIR/MacTools.xcodeproj"
 APP_NAME="MacTools"
 SCHEME="MacTools"
 CONFIG_FILE="${RELEASE_CONFIG_FILE:-$SCRIPT_DIR/release.local.env}"
+DEFAULT_GITHUB_REPOSITORY="ggbond268/MacTools"
 
 VERSION=""
 BUILD_NUMBER=""
@@ -51,6 +52,7 @@ Environment:
     APPLE_NOTARY_PROFILE
     GITHUB_REPOSITORY
     DMG_SIGNING_IDENTIFIER (optional)
+    SPARKLE_KEYCHAIN_ACCOUNT (optional)
 EOF
 }
 
@@ -180,9 +182,81 @@ function git_repository() {
       printf '%s\n' "${remote_url%.git}"
       ;;
     *)
-      return 1
+      printf '%s\n' "$DEFAULT_GITHUB_REPOSITORY"
       ;;
   esac
+}
+
+function sparkle_bin_dir() {
+  local bin_dir="${SPARKLE_BIN_DIR:-$DERIVED_DATA/SourcePackages/artifacts/sparkle/Sparkle/bin}"
+  [[ -x "$bin_dir/sign_update" ]] || fail "未找到 Sparkle 工具链：$bin_dir
+
+请先执行一次 xcodebuild / make build，让 Xcode 拉取 Sparkle 包依赖后再发布。"
+  printf '%s\n' "$bin_dir"
+}
+
+function sparkle_signature() {
+  local dmg_path="$1"
+  local bin_dir signature
+  bin_dir="$(sparkle_bin_dir)"
+  signature="$("$bin_dir/sign_update" --account "${SPARKLE_KEYCHAIN_ACCOUNT:-ed25519}" -p "$dmg_path")" \
+    || fail "无法使用 Sparkle EdDSA 私钥为 DMG 签名。
+
+请先运行：
+  $(sparkle_bin_dir)/generate_keys
+
+然后允许 Sparkle 访问本机钥匙串中的更新签名密钥。"
+
+  [[ -n "$signature" ]] || fail "Sparkle EdDSA 签名结果为空。"
+  printf '%s\n' "$signature"
+}
+
+function release_download_url() {
+  local repository="$1"
+  printf 'https://github.com/%s/releases/download/%s/%s.dmg\n' "$repository" "$TAG" "$APP_NAME"
+}
+
+function release_notes_url() {
+  local repository="$1"
+  printf 'https://github.com/%s/releases/tag/%s\n' "$repository" "$TAG"
+}
+
+function write_appcast() {
+  local dmg_path="$1"
+  local repository download_url notes_url signature file_size pub_date minimum_system_version
+
+  repository="$(git_repository)"
+  download_url="$(release_download_url "$repository")"
+  notes_url="$(release_notes_url "$repository")"
+  signature="$(sparkle_signature "$dmg_path")"
+  file_size="$(stat -f '%z' "$dmg_path")"
+  pub_date="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+  minimum_system_version="${SPARKLE_MINIMUM_SYSTEM_VERSION:-14.0}"
+
+  mkdir -p "$DOCS_DIR"
+
+  cat >"$APPCAST_PATH" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>${APP_NAME} Releases</title>
+        <description>Latest release metadata for ${APP_NAME}.</description>
+        <language>zh-CN</language>
+        <item>
+            <title>Version ${VERSION}</title>
+            <link>${notes_url}</link>
+            <sparkle:version>${BUILD_NUMBER}</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>${notes_url}</sparkle:releaseNotesLink>
+            <pubDate>${pub_date}</pubDate>
+            <enclosure url="${download_url}" length="${file_size}" type="application/octet-stream" sparkle:edSignature="${signature}" />
+            <sparkle:minimumSystemVersion>${minimum_system_version}</sparkle:minimumSystemVersion>
+        </item>
+    </channel>
+</rss>
+EOF
+
+  info "Appcast updated: $APPCAST_PATH"
 }
 
 function ensure_clean_git() {
@@ -403,6 +477,8 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 SIGNED_APP_PATH="$ARTIFACT_DIR/$APP_NAME.app"
 DMG_PATH="$ARTIFACT_DIR/$APP_NAME.dmg"
 DMG_IDENTIFIER=""
+DOCS_DIR="$ROOT_DIR/docs"
+APPCAST_PATH="$DOCS_DIR/appcast.xml"
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -457,5 +533,8 @@ fi
 if [[ "$PUBLISH_EXISTING" -eq 1 ]]; then
   publish_release "$DMG_PATH"
 fi
+
+write_appcast "$DMG_PATH"
+info "如果你使用 GitHub Pages 托管 appcast，请记得提交并推送 docs/appcast.xml。"
 
 info "Done"

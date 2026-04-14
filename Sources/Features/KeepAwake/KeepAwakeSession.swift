@@ -17,7 +17,7 @@ final class KeepAwakeSession {
         var errorDescription: String? {
             switch self {
             case .invalidEndDate:
-                return "自定义时间必须晚于当前时间。"
+                return "自动停止时间必须晚于当前时间。"
             case let .assertionCreationFailed(result):
                 return "无法启用阻止休眠，系统返回错误 \(result)。"
             }

@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+private enum ShortcutSettingsLayout {
+    static let controlColumnWidth: CGFloat = 128
+    static let controlHeight: CGFloat = 48
+}
+
 @MainActor
 final class ShortcutCaptureController: ObservableObject {
     @Published private(set) var recordingShortcutID: String?
@@ -179,16 +184,15 @@ private struct ShortcutSettingsRow: View {
                     .truncationMode(.tail)
                     .help(supportingText)
             }
-            .frame(maxWidth: 320, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .help(rowHelpText)
-
-            Spacer(minLength: 12)
 
             HStack(alignment: .center, spacing: 10) {
                 ShortcutBindingBadge(
                     text: isRecording ? "请按下快捷键" : item.bindingText,
                     isRecording: isRecording
                 )
+                .frame(width: ShortcutSettingsLayout.controlColumnWidth)
 
                 ShortcutActionGroup(
                     isRecording: isRecording,
@@ -201,6 +205,7 @@ private struct ShortcutSettingsRow: View {
                         ? "清除快捷键"
                         : (item.isRequired ? "该快捷键不能为空" : "当前没有可清除的快捷键")
                 )
+                .frame(width: ShortcutSettingsLayout.controlColumnWidth)
             }
         }
         .padding(.horizontal, 18)
@@ -274,7 +279,7 @@ private struct ShortcutActionGroup: View {
             )
         }
         .padding(4)
-        .frame(height: 40)
+        .frame(maxWidth: .infinity, minHeight: ShortcutSettingsLayout.controlHeight)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color(nsColor: .underPageBackgroundColor))
@@ -352,9 +357,8 @@ private struct ShortcutBindingBadge: View {
                 }
             }
         }
-        .frame(minWidth: 180, minHeight: 40, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: ShortcutSettingsLayout.controlHeight, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isRecording ? Color.accentColor.opacity(0.06) : Color(nsColor: .textBackgroundColor))

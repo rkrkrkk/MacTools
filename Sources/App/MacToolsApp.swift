@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct MacToolsApp: App {
     @StateObject private var pluginHost = PluginHost()
+    @StateObject private var appUpdater = AppUpdater()
 
     var body: some Scene {
         MenuBarExtra("MacTools", systemImage: menuBarSymbolName) {
@@ -16,7 +17,7 @@ struct MacToolsApp: App {
         .menuBarExtraStyle(.window)
 
         Window("设置", id: "settings") {
-            SettingsView(pluginHost: pluginHost)
+            SettingsView(pluginHost: pluginHost, appUpdater: appUpdater)
         }
         .defaultSize(width: 580, height: 420)
         .windowResizability(.contentSize)
