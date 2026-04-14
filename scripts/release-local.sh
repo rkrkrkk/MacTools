@@ -186,9 +186,9 @@ function git_repository() {
 }
 
 function ensure_clean_git() {
-  local status
-  status="$(git -C "$ROOT_DIR" status --porcelain)"
-  [[ -z "$status" ]] || fail "Git 工作区必须干净后才能 --publish。"
+  local worktree_status
+  worktree_status="$(git -C "$ROOT_DIR" status --porcelain)"
+  [[ -z "$worktree_status" ]] || fail "Git 工作区必须干净后才能 --publish。"
 }
 
 function ensure_tag_ready() {
