@@ -64,7 +64,15 @@ security find-identity -v -p codesigning
 DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)"
 ```
 
-3. 如果要公证，先执行一次：
+3. 可选：如果你想自定义 DMG 的签名 identifier，可以补一个 `DMG_SIGNING_IDENTIFIER`
+
+```sh
+DMG_SIGNING_IDENTIFIER="com.example.mactools.disk-image"
+```
+
+默认会从 `.app` 的 `CFBundleIdentifier` 自动派生为 `<bundle-id>.disk-image`。
+
+4. 如果要公证，先执行一次：
 
 ```sh
 xcrun notarytool store-credentials "MacTools-Notary" \
@@ -73,19 +81,29 @@ xcrun notarytool store-credentials "MacTools-Notary" \
   --password "app-specific-password"
 ```
 
-4. 运行本地正式包脚本：
+5. 运行本地正式包脚本：
 
 ```sh
 ./scripts/release-local.sh --version 0.1.0
 ```
 
-5. 如果只想先验证打包链路，不签名不公证：
+脚本现在的正式流程是：
+
+- 无签名构建 `MacTools.app`
+- 用 `Developer ID Application` 签 `MacTools.app`
+- 创建 `MacTools.dmg`
+- 用 `Developer ID Application` 再签 `MacTools.dmg`
+- 提交 Apple 公证
+- `staple` 公证票据
+- 用 `spctl` 验证最终 DMG 是否被 Gatekeeper 接受
+
+6. 如果只想先验证打包链路，不签名不公证：
 
 ```sh
 ./scripts/release-local.sh --version 0.1.0 --skip-sign
 ```
 
-6. 如果要把 DMG 同步到 GitHub Release：
+7. 如果要把 DMG 同步到 GitHub Release：
 
 ```sh
 gh auth login
@@ -93,5 +111,14 @@ gh auth login
 ```
 
 `--publish` 会确保工作区干净、创建或复用 `v0.1.0` 标签、推送标签到 `origin`，然后把 `MacTools.dmg` 同步到 GitHub Release。
+
+最常用的正式发布顺序就是直接一次跑完：
+
+```sh
+gh auth login
+./scripts/release-local.sh --version 0.1.0 --publish
+```
+
+这样会按“构建 -> 签 `.app` -> 创建并签 `DMG` -> 公证 -> staple -> Gatekeeper 验证 -> 上传 GitHub Release”的顺序完整执行。
 
 更多参数和发布说明见 `./scripts/release-local.sh --help`。

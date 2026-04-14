@@ -48,6 +48,7 @@ Environment:
     DEVELOPER_ID_APPLICATION
     APPLE_NOTARY_PROFILE
     GITHUB_REPOSITORY
+    DMG_SIGNING_IDENTIFIER (optional)
 EOF
 }
 
@@ -217,6 +218,23 @@ function sign_path() {
     "$path"
 }
 
+function app_bundle_identifier() {
+  local app_path="$1"
+  /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app_path/Contents/Info.plist" 2>/dev/null \
+    || fail "无法从 $app_path 读取 CFBundleIdentifier。"
+}
+
+function dmg_signing_identifier() {
+  local app_path="$1"
+
+  if [[ -n "${DMG_SIGNING_IDENTIFIER:-}" ]]; then
+    printf '%s\n' "$DMG_SIGNING_IDENTIFIER"
+    return 0
+  fi
+
+  printf '%s\n' "$(app_bundle_identifier "$app_path").disk-image"
+}
+
 function sign_app_bundle() {
   local app_path="$1"
 
@@ -234,6 +252,20 @@ function sign_app_bundle() {
 
   sign_path "$app_path"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path"
+}
+
+function sign_disk_image() {
+  local dmg_path="$1"
+  local identifier="$2"
+
+  /usr/bin/codesign \
+    --force \
+    --sign "$DEVELOPER_ID_APPLICATION" \
+    --timestamp \
+    --identifier "$identifier" \
+    "$dmg_path"
+
+  /usr/bin/codesign --verify --verbose=2 "$dmg_path"
 }
 
 function build_release_app() {
@@ -291,6 +323,18 @@ function notarize_dmg() {
   xcrun stapler staple -v "$dmg_path"
 }
 
+function validate_notarized_dmg() {
+  local dmg_path="$1"
+  local assessment_output
+
+  assessment_output="$(spctl -a -t open --context context:primary-signature -v "$dmg_path" 2>&1)" \
+    || fail "Gatekeeper 未接受最终 DMG：
+$assessment_output"
+
+  info "Gatekeeper assessment passed"
+  printf '%s\n' "$assessment_output"
+}
+
 function publish_release() {
   local dmg_path="$1"
   local repository
@@ -339,6 +383,7 @@ DERIVED_DATA="$ROOT_DIR/build/DerivedData"
 APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 SIGNED_APP_PATH="$ARTIFACT_DIR/$APP_NAME.app"
 DMG_PATH="$ARTIFACT_DIR/$APP_NAME.dmg"
+DMG_IDENTIFIER=""
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -357,15 +402,22 @@ if [[ "$SKIP_SIGN" -eq 0 ]]; then
   require_release_signing_identity
   info "Signing app with Developer ID"
   sign_app_bundle "$SIGNED_APP_PATH"
+  DMG_IDENTIFIER="$(dmg_signing_identifier "$SIGNED_APP_PATH")"
 else
   info "Skipping code signing"
 fi
 
 create_dmg "$SIGNED_APP_PATH" "$DMG_PATH"
 
+if [[ "$SKIP_SIGN" -eq 0 ]]; then
+  info "Signing DMG with Developer ID identifier=$DMG_IDENTIFIER"
+  sign_disk_image "$DMG_PATH" "$DMG_IDENTIFIER"
+fi
+
 if [[ "$SKIP_NOTARIZE" -eq 0 ]]; then
   require_command xcrun
   notarize_dmg "$DMG_PATH"
+  validate_notarized_dmg "$DMG_PATH"
 else
   info "Skipping notarization"
 fi

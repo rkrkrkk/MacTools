@@ -1,11 +1,14 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import IOKit.pwr_mgt
 import OSLog
 import SwiftUI
 
 @MainActor
 final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
+    private static let nullAssertionID = IOPMAssertionID(0)
+
     private struct NotificationObservation {
         let center: NotificationCenter
         let token: NSObjectProtocol
@@ -21,6 +24,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         case runLoopSourceUnavailable
         case missingScreens
         case overlayWindowCreationFailed
+        case idleLockPreventionFailed
 
         var errorDescription: String? {
             switch self {
@@ -32,6 +36,8 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 return "未检测到可用屏幕，无法进入物理清洁模式。"
             case .overlayWindowCreationFailed:
                 return "无法创建屏幕覆盖窗口，已取消进入物理清洁模式。"
+            case .idleLockPreventionFailed:
+                return "无法启用防空闲锁屏保护，已取消进入物理清洁模式。"
             }
         }
     }
@@ -190,6 +196,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
     private var notificationObservers: [NotificationObservation] = []
     private var previousPresentationOptions: NSApplication.PresentationOptions?
     private var cursorHidden = false
+    private var idleSleepAssertionID = IOPMAssertionID(0)
     private var isStopping = false
     private var tapDisableTimestamps: [Date] = []
 
@@ -268,6 +275,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 .disableProcessSwitching
             ]
 
+            try enableIdleLockPrevention()
             try rebuildOverlayWindows()
             installObservers()
             hideCursor()
@@ -304,6 +312,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
 
     private func installObservers() {
         let appCenter = NotificationCenter.default
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
 
         notificationObservers.append(
             NotificationObservation(
@@ -331,7 +340,58 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 Task { @MainActor in
                     self?.requestStop(reason: .userRequested)
                 }
-            }
+                }
+            )
+        )
+
+        notificationObservers.append(
+            NotificationObservation(
+                center: workspaceCenter,
+                token: workspaceCenter.addObserver(
+                    forName: NSWorkspace.sessionDidResignActiveNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.handleWorkspaceInterruption(
+                            message: "当前会话已锁定或切出，已自动退出物理清洁模式。"
+                        )
+                    }
+                }
+            )
+        )
+
+        notificationObservers.append(
+            NotificationObservation(
+                center: workspaceCenter,
+                token: workspaceCenter.addObserver(
+                    forName: NSWorkspace.screensDidSleepNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.handleWorkspaceInterruption(
+                            message: "屏幕已进入睡眠，已自动退出物理清洁模式。"
+                        )
+                    }
+                }
+            )
+        )
+
+        notificationObservers.append(
+            NotificationObservation(
+                center: workspaceCenter,
+                token: workspaceCenter.addObserver(
+                    forName: NSWorkspace.willSleepNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.handleWorkspaceInterruption(
+                            message: "系统即将进入睡眠，已自动退出物理清洁模式。"
+                        )
+                    }
+                }
             )
         )
     }
@@ -358,6 +418,14 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         } catch {
             requestEmergencyExit(message: error.localizedDescription)
         }
+    }
+
+    private func handleWorkspaceInterruption(message: String) {
+        guard !isStopping else {
+            return
+        }
+
+        requestEmergencyExit(message: message)
     }
 
     private func rebuildOverlayWindows() throws {
@@ -418,6 +486,45 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         }
 
         return windows
+    }
+
+    private func enableIdleLockPrevention() throws {
+        guard idleSleepAssertionID == Self.nullAssertionID else {
+            return
+        }
+
+        var assertionID = Self.nullAssertionID
+        let result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "MacTools Physical Clean Mode" as CFString,
+            &assertionID
+        )
+
+        guard result == kIOReturnSuccess else {
+            logger.error(
+                "[\(self.sessionIdentifier, privacy: .public)] failed to create idle-sleep assertion result=\(result, privacy: .public)"
+            )
+            throw SessionError.idleLockPreventionFailed
+        }
+
+        idleSleepAssertionID = assertionID
+    }
+
+    private func releaseIdleLockPrevention() {
+        guard idleSleepAssertionID != Self.nullAssertionID else {
+            return
+        }
+
+        let assertionID = idleSleepAssertionID
+        idleSleepAssertionID = Self.nullAssertionID
+        let result = IOPMAssertionRelease(assertionID)
+
+        if result != kIOReturnSuccess {
+            logger.error(
+                "[\(self.sessionIdentifier, privacy: .public)] failed to release idle-sleep assertion result=\(result, privacy: .public)"
+            )
+        }
     }
 
     private func closeOverlayWindows(_ windows: [OverlayWindow]? = nil) {
@@ -488,6 +595,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         }
 
         showCursorIfNeeded()
+        releaseIdleLockPrevention()
 
         if let previousPresentationOptions {
             NSApp.presentationOptions = previousPresentationOptions
