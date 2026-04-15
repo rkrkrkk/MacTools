@@ -75,6 +75,24 @@ final class DisplayResolutionPluginTests: XCTestCase {
         XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [51])
     }
 
+    func testDedupeModesPrefersHiDPIOverLoDPIForSameLogicalResolution() {
+        let modes = [
+            makeMode(modeId: 60, width: 2560, height: 1440, pixelWidth: 2560, pixelHeight: 1440, isHiDPI: false),
+            makeMode(modeId: 61, width: 2560, height: 1440, pixelWidth: 5120, pixelHeight: 2880, isHiDPI: true)
+        ]
+
+        XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [61])
+    }
+
+    func testDedupeModesPreservesCurrentLoDPIOverHiDPIDuplicate() {
+        let modes = [
+            makeMode(modeId: 70, width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, isHiDPI: true),
+            makeMode(modeId: 71, width: 1920, height: 1080, pixelWidth: 1920, pixelHeight: 1080, isHiDPI: false, isCurrent: true)
+        ]
+
+        XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [71])
+    }
+
     func testDisplayResolutionInfoEquatableByModeId() {
         XCTAssertEqual(
             makeMode(modeId: 99, width: 3008, height: 1692),

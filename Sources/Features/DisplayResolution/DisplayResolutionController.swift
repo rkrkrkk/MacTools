@@ -119,16 +119,7 @@ final class DisplayResolutionController {
     }
 
     nonisolated private static func deduplicationKey(for mode: DisplayResolutionInfo) -> String {
-        let tag: String
-        if mode.isNative {
-            tag = "native"
-        } else if mode.isDefault {
-            tag = "default"
-        } else {
-            tag = "scaled"
-        }
-
-        return "\(tag):\(mode.width)x\(mode.height)"
+        "\(mode.width)x\(mode.height)"
     }
 
     nonisolated private static func preferredMode(
@@ -137,6 +128,10 @@ final class DisplayResolutionController {
     ) -> DisplayResolutionInfo {
         if existing.isCurrent != candidate.isCurrent {
             return existing.isCurrent ? existing : candidate
+        }
+
+        if existing.isHiDPI != candidate.isHiDPI {
+            return existing.isHiDPI ? existing : candidate
         }
 
         return existing.refreshRate >= candidate.refreshRate ? existing : candidate
