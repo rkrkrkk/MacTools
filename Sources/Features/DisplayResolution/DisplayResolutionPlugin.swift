@@ -2,6 +2,10 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 
+private enum ControlID {
+    static let displayNavigation = "display-navigation"
+}
+
 @MainActor
 final class DisplayResolutionPlugin: FeaturePlugin {
     let manifest = PluginManifest(
@@ -20,13 +24,23 @@ final class DisplayResolutionPlugin: FeaturePlugin {
     var shortcutBindingResolver: ((String) -> ShortcutBinding?)?
 
     private var isExpanded = false
+    private var selectedDisplayID: CGDirectDisplayID?
     private var lastErrorMessage: String?
-    private let controller = DisplayResolutionController()
+    private let controller: DisplayResolutionControlling
+
+    init(controller: DisplayResolutionControlling = DisplayResolutionController()) {
+        self.controller = controller
+    }
 
     var panelState: PluginPanelState {
         let displays = controller.listConnectedDisplays()
 
+        if !displays.contains(where: { $0.id == selectedDisplayID }) {
+            selectedDisplayID = nil
+        }
+
         guard !displays.isEmpty else {
+            selectedDisplayID = nil
             return PluginPanelState(
                 subtitle: "未检测到可用显示器",
                 isOn: false,
@@ -59,7 +73,21 @@ final class DisplayResolutionPlugin: FeaturePlugin {
         switch action {
         case let .setDisclosureExpanded(value):
             isExpanded = value
+            if !value {
+                selectedDisplayID = nil
+            }
             lastErrorMessage = nil
+            onStateChange?()
+        case let .setNavigationSelection(controlID, optionID):
+            guard
+                controlID == ControlID.displayNavigation,
+                let rawDisplayID = UInt32(optionID)
+            else {
+                return
+            }
+
+            let displayID = CGDirectDisplayID(rawDisplayID)
+            selectedDisplayID = selectedDisplayID == displayID ? nil : displayID
             onStateChange?()
         case let .setSelection(controlID, optionID):
             guard let displayID = Self.parseDisplayID(from: controlID), let modeId = Int32(optionID) else {
@@ -87,7 +115,7 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             case .failure(let error):
                 handleApplyFailure(error, displayID: displayID, modeId: modeId)
             }
-        case .setSwitch, .setNavigationSelection, .setDate:
+        case .setSwitch, .setDate:
             return
         }
     }
@@ -137,25 +165,66 @@ final class DisplayResolutionPlugin: FeaturePlugin {
     }
 
     private func buildDetail(for displays: [DisplayInfo]) -> PluginPanelDetail {
-        let controls = displays.compactMap { display -> PluginPanelControl? in
-            let modes = Self.visibleModes(controller.listAvailableResolutions(for: display.id))
-            guard !modes.isEmpty else { return nil }
+        let displayNavigation = PluginPanelControl(
+            id: ControlID.displayNavigation,
+            kind: .navigationList,
+            options: displays.map { display in
+                let currentSummary = controller
+                    .listAvailableResolutions(for: display.id)
+                    .first(where: { $0.isCurrent })?
+                    .displayTitle ?? "未知"
 
-            return PluginPanelControl(
-                id: "display.\(display.id)",
+                return PluginPanelControlOption(
+                    id: String(display.id),
+                    title: display.name,
+                    subtitle: currentSummary
+                )
+            },
+            selectedOptionID: selectedDisplayID.map(String.init),
+            dateValue: nil,
+            minimumDate: nil,
+            displayedComponents: nil,
+            datePickerStyle: nil,
+            sectionTitle: nil,
+            isEnabled: true
+        )
+
+        let secondaryPanel = selectedDisplayID.flatMap { selectedID -> PluginPanelSecondaryPanel? in
+            guard let display = displays.first(where: { $0.id == selectedID }) else {
+                return nil
+            }
+
+            let modes = Self.visibleModes(controller.listAvailableResolutions(for: selectedID))
+            guard !modes.isEmpty else {
+                return nil
+            }
+
+            let resolutionControl = PluginPanelControl(
+                id: "display.\(selectedID)",
                 kind: .selectList,
-                options: modes.map { PluginPanelControlOption(id: String($0.modeId), title: Self.optionTitle(for: $0)) },
+                options: modes.map {
+                    PluginPanelControlOption(
+                        id: String($0.modeId),
+                        title: Self.optionTitle(for: $0),
+                        subtitle: nil
+                    )
+                },
                 selectedOptionID: modes.first(where: { $0.isCurrent }).map { String($0.modeId) },
                 dateValue: nil,
                 minimumDate: nil,
                 displayedComponents: nil,
                 datePickerStyle: nil,
-                sectionTitle: display.name,
+                sectionTitle: nil,
                 isEnabled: true
             )
+
+            return PluginPanelSecondaryPanel(title: display.name, controls: [resolutionControl])
         }
 
-        return PluginPanelDetail(controls: controls)
+        return PluginPanelDetail(
+            primaryControls: [displayNavigation],
+            secondaryPanel: secondaryPanel
+        )
     }
 
     private func handleApplyFailure(

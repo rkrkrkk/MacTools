@@ -3,6 +3,16 @@ import CoreGraphics
 import Foundation
 
 @MainActor
+protocol DisplayResolutionControlling {
+    func listConnectedDisplays() -> [DisplayInfo]
+    func listAvailableResolutions(for displayID: CGDirectDisplayID) -> [DisplayResolutionInfo]
+    func applyResolution(
+        _ info: DisplayResolutionInfo,
+        for displayID: CGDirectDisplayID
+    ) -> Result<Void, DisplayResolutionError>
+}
+
+@MainActor
 final class DisplayResolutionController {
     func listConnectedDisplays() -> [DisplayInfo] {
         var activeCount: UInt32 = 0
@@ -156,3 +166,5 @@ final class DisplayResolutionController {
         return existing.refreshRate >= candidate.refreshRate ? existing : candidate
     }
 }
+
+extension DisplayResolutionController: DisplayResolutionControlling {}
