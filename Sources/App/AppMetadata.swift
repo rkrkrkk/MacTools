@@ -10,12 +10,12 @@ enum AppMetadata {
             ?? "MacTools"
     }
 
-    static var shortVersion: String {
-        bundleString("CFBundleShortVersionString") ?? "0.3.0"
+    static var shortVersion: String? {
+        bundleString("CFBundleShortVersionString")
     }
 
-    static var buildNumber: String {
-        bundleString(kCFBundleVersionKey as String) ?? "3"
+    static var buildNumber: String? {
+        bundleString(kCFBundleVersionKey as String)
     }
 
     static var versionDescription: String {
@@ -43,7 +43,16 @@ enum AppMetadata {
         Bundle.main.object(forInfoDictionaryKey: key) as? String
     }
 
-    static func formattedVersionDescription(shortVersion: String, buildNumber: String) -> String {
-        "\(shortVersion) (\(buildNumber))"
+    static func formattedVersionDescription(shortVersion: String?, buildNumber: String?) -> String {
+        switch (shortVersion, buildNumber) {
+        case let (shortVersion?, buildNumber?) where !shortVersion.isEmpty && !buildNumber.isEmpty:
+            return "\(shortVersion) (\(buildNumber))"
+        case let (shortVersion?, _):
+            return shortVersion
+        case let (_, buildNumber?) where !buildNumber.isEmpty:
+            return buildNumber
+        default:
+            return "未知版本"
+        }
     }
 }
