@@ -31,6 +31,9 @@ struct MenuBarContent: View {
                                 handlePanelSwitchChange(newValue, for: item)
                             }
                         ),
+                        onDisclosureToggle: { isExpanded in
+                            pluginHost.setDisclosureExpanded(isExpanded, for: item.id)
+                        },
                         onSelectionChange: { controlID, optionID in
                             pluginHost.setPanelSelectionValue(
                                 optionID,
@@ -129,47 +132,26 @@ struct MenuBarContent: View {
 struct FeatureRowView: View {
     let item: PluginPanelItem
     @Binding var isOn: Bool
+    let onDisclosureToggle: (Bool) -> Void
     let onSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.detail == nil ? 0 : 12) {
-            HStack(alignment: .center, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(item.iconTint.opacity(0.14))
-
-                    Image(systemName: item.iconName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(item.iconTint)
+        VStack(alignment: .leading, spacing: detailToDisplay == nil ? 0 : 12) {
+            switch item.controlStyle {
+            case .switch:
+                rowHeader
+            case .disclosure:
+                Button {
+                    onDisclosureToggle(!item.isExpanded)
+                } label: {
+                    rowHeader
                 }
-                .frame(width: FeatureRowLayout.iconSize, height: FeatureRowLayout.iconSize)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-
-                    Text(item.description)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(item.helpText)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                switch item.controlStyle {
-                case .switch:
-                    Toggle(String(), isOn: $isOn)
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .toggleStyle(.switch)
-                        .disabled(!item.isEnabled)
-                }
+                .buttonStyle(.plain)
+                .disabled(!item.isEnabled)
             }
 
-            if let detail = item.detail {
+            if let detail = detailToDisplay {
                 PluginPanelDetailView(
                     detail: detail,
                     onSelectionChange: onSelectionChange,
@@ -186,6 +168,60 @@ struct FeatureRowView: View {
         )
         .contentShape(Rectangle())
         .help(item.helpText)
+    }
+
+    private var rowHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(item.iconTint.opacity(0.14))
+
+                Image(systemName: item.iconName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(item.iconTint)
+            }
+            .frame(width: FeatureRowLayout.iconSize, height: FeatureRowLayout.iconSize)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+
+                Text(item.description)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(item.descriptionTone == .error ? Color.red : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(item.helpText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            switch item.controlStyle {
+            case .switch:
+                Toggle(String(), isOn: $isOn)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .toggleStyle(.switch)
+                    .disabled(!item.isEnabled)
+            case .disclosure:
+                Image(systemName: item.isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+    }
+
+    private var detailToDisplay: PluginPanelDetail? {
+        guard let detail = item.detail else {
+            return nil
+        }
+
+        if item.controlStyle == .disclosure && !item.isExpanded {
+            return nil
+        }
+
+        return detail
     }
 }
 
@@ -245,10 +281,89 @@ private struct PluginPanelDetailView: View {
                             isEnabled: control.isEnabled
                         )
                     }
+                case .selectList:
+                    SelectListControl(
+                        control: control,
+                        onSelect: { optionID in
+                            onSelectionChange(control.id, optionID)
+                        }
+                    )
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SelectListControl: View {
+    let control: PluginPanelControl
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let title = control.sectionTitle {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 6)
+                    .padding(.bottom, 2)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(control.options) { option in
+                    SelectListRow(
+                        title: option.title,
+                        isSelected: option.id == control.selectedOptionID,
+                        isEnabled: control.isEnabled,
+                        action: { onSelect(option.id) }
+                    )
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+}
+
+private struct SelectListRow: View {
+    let title: String
+    let isSelected: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            guard isInteractive else {
+                return
+            }
+
+            action()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 14)
+
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(isInteractive && isHovered ? Color.primary.opacity(0.06) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 }
+    }
+
+    private var isInteractive: Bool {
+        isEnabled && !isSelected
     }
 }
 
