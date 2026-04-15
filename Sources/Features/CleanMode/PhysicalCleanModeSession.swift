@@ -33,11 +33,11 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
             case .runLoopSourceUnavailable:
                 return "无法初始化输入拦截运行循环。"
             case .missingScreens:
-                return "未检测到可用屏幕，无法进入物理清洁模式。"
+                return "未检测到可用屏幕，无法进入清洁模式。"
             case .overlayWindowCreationFailed:
-                return "无法创建屏幕覆盖窗口，已取消进入物理清洁模式。"
+                return "无法创建屏幕覆盖窗口，已取消进入清洁模式。"
             case .idleLockPreventionFailed:
-                return "无法启用防空闲锁屏保护，已取消进入物理清洁模式。"
+                return "无法启用防空闲锁屏保护，已取消进入清洁模式。"
             }
         }
     }
@@ -201,7 +201,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
     private var tapDisableTimestamps: [Date] = []
 
     private var exitHintText: String {
-        "按 \(Self.displayTokens(for: exitBinding).joined(separator: " + ")) 退出清洁模式"
+        "按 \(Self.displayTokens(for: exitBinding).joined(separator: " + ")) 退出"
     }
 
     init(
@@ -307,7 +307,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         }
 
         logger.error("[\(self.sessionIdentifier, privacy: .public)] overlay window will close unexpectedly")
-        requestEmergencyExit(message: "物理清洁模式覆盖窗口意外关闭，已恢复系统输入。")
+        requestEmergencyExit(message: "清洁模式覆盖窗口意外关闭，已恢复系统输入。")
     }
 
     private func installObservers() {
@@ -354,7 +354,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 ) { [weak self] _ in
                     Task { @MainActor in
                         self?.handleWorkspaceInterruption(
-                            message: "当前会话已锁定或切出，已自动退出物理清洁模式。"
+                            message: "当前会话已锁定或切出，已自动退出清洁模式。"
                         )
                     }
                 }
@@ -371,7 +371,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 ) { [weak self] _ in
                     Task { @MainActor in
                         self?.handleWorkspaceInterruption(
-                            message: "屏幕已进入睡眠，已自动退出物理清洁模式。"
+                            message: "屏幕已进入睡眠，已自动退出清洁模式。"
                         )
                     }
                 }
@@ -388,7 +388,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
                 ) { [weak self] _ in
                     Task { @MainActor in
                         self?.handleWorkspaceInterruption(
-                            message: "系统即将进入睡眠，已自动退出物理清洁模式。"
+                            message: "系统即将进入睡眠，已自动退出清洁模式。"
                         )
                     }
                 }
@@ -618,10 +618,10 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
             requestStop(reason: .userRequested)
         case .disabledByTimeout:
             logger.error("[\(self.sessionIdentifier, privacy: .public)] event tap could not recover from timeout interruption")
-            requestEmergencyExit(message: "输入拦截重启失败，已自动退出物理清洁模式。")
+            requestEmergencyExit(message: "输入拦截重启失败，已自动退出清洁模式。")
         case .disabledByUserInput:
             logger.error("[\(self.sessionIdentifier, privacy: .public)] event tap could not recover from user-input interruption")
-            requestEmergencyExit(message: "输入拦截被系统停用且无法恢复，已自动退出物理清洁模式。")
+            requestEmergencyExit(message: "输入拦截被系统停用且无法恢复，已自动退出清洁模式。")
         }
     }
 
@@ -642,7 +642,7 @@ final class PhysicalCleanModeSession: NSObject, NSWindowDelegate {
         tapDisableTimestamps.removeAll { now.timeIntervalSince($0) > 2 }
 
         if tapDisableTimestamps.count >= 3 {
-            requestEmergencyExit(message: "输入拦截被系统连续停用，已自动退出物理清洁模式。")
+            requestEmergencyExit(message: "输入拦截被系统连续停用，已自动退出清洁模式。")
         }
     }
 

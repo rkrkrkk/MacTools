@@ -24,7 +24,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
 
     let manifest = PluginManifest(
         id: "physical-clean-mode",
-        title: "物理清洁模式",
+        title: "清洁模式",
         iconName: "sparkles.rectangle.stack",
         iconTint: Color(nsColor: .systemCyan),
         controlStyle: .switch,
@@ -70,7 +70,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
                 id: PermissionID.accessibility,
                 kind: .accessibility,
                 title: "辅助功能授权",
-                description: "辅助功能权限是物理清洁模式运行所需的必要权限。"
+                description: "辅助功能权限是清洁模式运行所需的必要权限。"
             )
         ]
     }
@@ -81,8 +81,8 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
         [
             PluginShortcutDefinition(
                 id: ShortcutID.exitPhysicalCleanMode,
-                title: "退出物理清洁模式",
-                description: "物理清洁模式启用时用于恢复输入和关闭黑屏覆盖的快捷键。",
+                title: "退出清洁模式",
+                description: "清洁模式启用时用于恢复输入和关闭黑屏覆盖的快捷键。",
                 actionID: ActionID.exitPhysicalCleanMode,
                 scope: .whilePluginActive,
                 defaultBinding: ShortcutBinding(
@@ -103,7 +103,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
                 lastErrorMessage = nil
             }
         } else if session != nil {
-            session?.requestEmergencyExit(message: "辅助功能授权已失效，已自动退出物理清洁模式。")
+            session?.requestEmergencyExit(message: "辅助功能授权已失效，已自动退出清洁模式。")
         }
 
         if previousAccessState != isAccessibilityGranted {
@@ -118,7 +118,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
                 logger.debug("panel action setSwitch isEnabled=\(isEnabled, privacy: .public)")
             }
             setPhysicalCleanModeEnabled(isEnabled)
-        case .setDisclosureExpanded, .setSelection, .setNavigationSelection, .setDate:
+        case .setDisclosureExpanded, .setSelection, .setNavigationSelection, .clearNavigationSelection, .setDate:
             break
         }
     }
@@ -179,7 +179,7 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
             lastErrorMessage = nil
         } else {
             logger.notice("accessibility permission is required before entering physical clean mode")
-            lastErrorMessage = "物理清洁模式需要辅助功能权限，请先前往设置完成授权。"
+            lastErrorMessage = "清洁模式需要辅助功能权限，请先前往设置完成授权。"
 
             if showSettingsGuidance {
                 requestPermissionGuidance?(PermissionID.accessibility)

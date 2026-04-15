@@ -109,7 +109,15 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             }
 
             let displayID = CGDirectDisplayID(rawDisplayID)
-            selectedDisplayID = selectedDisplayID == displayID ? nil : displayID
+            selectedDisplayID = displayID
+            lastErrorMessage = nil
+            onStateChange?()
+        case let .clearNavigationSelection(controlID):
+            guard controlID == ControlID.displayNavigation else {
+                return
+            }
+
+            selectedDisplayID = nil
             lastErrorMessage = nil
             onStateChange?()
         case let .setSelection(controlID, optionID):

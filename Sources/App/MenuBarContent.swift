@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 
 enum MenuBarPanelLayout {
-    static let baseWidth: CGFloat = 312
+    static let baseWidth: CGFloat = 296
     static let secondaryPanelWidth: CGFloat = 220
     static let panelSpacing: CGFloat = 12
-    static let outerPadding: CGFloat = 8
+    static let outerPadding: CGFloat = 4
     static let navigationRowHeight: CGFloat = 58
 
     static var surfaceWidth: CGFloat {
@@ -23,6 +23,144 @@ private enum FeatureRowLayout {
     static let detailLeadingInset: CGFloat = iconSize + rowSpacing
 }
 
+private enum MenuBarHoverStyle {
+    static let cornerRadius: CGFloat = 12
+    static let fill = Color.primary.opacity(0.06)
+    static let inset: CGFloat = 1
+    static let navigationCornerRadius: CGFloat = 10
+    static let navigationFill = Color.primary.opacity(0.10)
+    static let navigationSelectedFill = Color.primary.opacity(0.13)
+}
+
+@MainActor
+final class HoverSecondaryPanelCoordinator: ObservableObject {
+    struct Activation: Equatable {
+        let pluginID: String
+        let controlID: String
+        let optionID: String
+    }
+
+    @Published private(set) var activeActivation: Activation?
+    @Published private(set) var selectedRowFrame: CGRect?
+
+    var onDismissRequest: ((Activation) -> Void)?
+
+    private let dismissDelay: Duration
+    private var dismissTask: Task<Void, Never>?
+    private var isPanelHovered = false
+
+    init(dismissDelay: Duration = .milliseconds(160)) {
+        self.dismissDelay = dismissDelay
+    }
+
+    func hoverBegan(
+        pluginID: String,
+        controlID: String,
+        optionID: String
+    ) {
+        let activation = Activation(
+            pluginID: pluginID,
+            controlID: controlID,
+            optionID: optionID
+        )
+
+        cancelDismissal()
+        isPanelHovered = false
+
+        if activeActivation != activation {
+            selectedRowFrame = nil
+        }
+
+        activeActivation = activation
+    }
+
+    func hoverEnded(
+        pluginID: String,
+        controlID: String,
+        optionID: String
+    ) {
+        scheduleDismissIfNeeded(
+            expectedActivation: Activation(
+                pluginID: pluginID,
+                controlID: controlID,
+                optionID: optionID
+            )
+        )
+    }
+
+    func setPanelHovered(_ isHovered: Bool) {
+        isPanelHovered = isHovered
+
+        if isHovered {
+            cancelDismissal()
+        } else {
+            scheduleDismissIfNeeded(expectedActivation: activeActivation)
+        }
+    }
+
+    func setSelectedRowFrame(_ frame: CGRect?) {
+        selectedRowFrame = frame
+    }
+
+    func dismissImmediately() {
+        dismissInternal(notify: true)
+    }
+
+    private func scheduleDismissIfNeeded(expectedActivation: Activation?) {
+        cancelDismissal()
+
+        guard
+            let expectedActivation,
+            activeActivation == expectedActivation
+        else {
+            return
+        }
+
+        dismissTask = Task { [dismissDelay] in
+            try? await Task.sleep(for: dismissDelay)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            dismissIfNeeded(expectedActivation)
+        }
+    }
+
+    private func dismissIfNeeded(_ expectedActivation: Activation) {
+        guard
+            activeActivation == expectedActivation,
+            !isPanelHovered
+        else {
+            return
+        }
+
+        dismissInternal(notify: true)
+    }
+
+    private func dismissInternal(notify: Bool) {
+        cancelDismissal()
+
+        guard let activation = activeActivation else {
+            selectedRowFrame = nil
+            isPanelHovered = false
+            return
+        }
+
+        activeActivation = nil
+        selectedRowFrame = nil
+        isPanelHovered = false
+
+        if notify {
+            onDismissRequest?(activation)
+        }
+    }
+
+    private func cancelDismissal() {
+        dismissTask?.cancel()
+        dismissTask = nil
+    }
+}
+
 struct MenuBarContent: View {
     private struct DeferredPanelSwitchAction {
         let pluginID: String
@@ -30,31 +168,47 @@ struct MenuBarContent: View {
     }
 
     @StateObject private var secondaryPanelController = SecondaryPanelController()
+    @StateObject private var hoverCoordinator = HoverSecondaryPanelCoordinator()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
 
     @ObservedObject var pluginHost: PluginHost
     @State private var deferredPanelSwitchAction: DeferredPanelSwitchAction?
-    @State private var selectedNavigationRowFrame: CGRect?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             featureCards
+            Divider()
             settingsCard
         }
         .padding(MenuBarPanelLayout.outerPadding)
         .frame(width: MenuBarPanelLayout.width(for: pluginHost.panelItems), alignment: .leading)
         .background(
             MenuWindowAccessor { window in
-                secondaryPanelController.hostWindow = window
+                secondaryPanelController.setHostWindow(window)
                 syncSecondaryPanelWindow()
             }
         )
-        .animation(.easeOut(duration: 0.18), value: attachedSecondaryPanelItemID)
-        .onChange(of: attachedSecondaryPanelItemID) {
+        .onAppear {
+            hoverCoordinator.onDismissRequest = { activation in
+                pluginHost.clearPanelNavigationSelection(
+                    controlID: activation.controlID,
+                    for: activation.pluginID
+                )
+            }
+
+            secondaryPanelController.onHostWindowDismissRequest = {
+                hoverCoordinator.dismissImmediately()
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: activeSecondaryPanelSignature)
+        .onChange(of: activeSecondaryPanelSignature) {
             syncSecondaryPanelWindow()
         }
-        .onChange(of: selectedNavigationRowFrame) {
+        .onChange(of: hoverCoordinator.selectedRowFrame) {
+            syncSecondaryPanelWindow()
+        }
+        .onChange(of: hoverCoordinator.activeActivation) {
             syncSecondaryPanelWindow()
         }
         .onReceive(pluginHost.$settingsPresentationRequestCount.dropFirst()) { _ in
@@ -62,7 +216,10 @@ struct MenuBarContent: View {
         }
         .onDisappear {
             flushDeferredPanelSwitchActionIfNeeded()
-            secondaryPanelController.hide()
+            hoverCoordinator.dismissImmediately()
+            hoverCoordinator.onDismissRequest = nil
+            secondaryPanelController.onHostWindowDismissRequest = nil
+            secondaryPanelController.setHostWindow(nil)
         }
     }
 
@@ -99,9 +256,10 @@ struct MenuBarContent: View {
 
     private func syncSecondaryPanelWindow() {
         guard
-            let panelItem = attachedSecondaryPanelItem,
+            let activation = hoverCoordinator.activeActivation,
+            let panelItem = pluginHost.panelItems.first(where: { $0.id == activation.pluginID }),
             let panel = panelItem.detail?.secondaryPanel,
-            let anchorRect = selectedNavigationRowFrame
+            let anchorRect = hoverCoordinator.selectedRowFrame
         else {
             secondaryPanelController.hide()
             return
@@ -109,7 +267,6 @@ struct MenuBarContent: View {
 
         secondaryPanelController.show(
             panel: panel,
-            pluginID: panelItem.id,
             anchorRect: anchorRect,
             onSelectionChange: { controlID, optionID in
                 pluginHost.setPanelSelectionValue(optionID, controlID: controlID, for: panelItem.id)
@@ -119,26 +276,53 @@ struct MenuBarContent: View {
             },
             onDateChange: { controlID, date in
                 pluginHost.setPanelDateValue(date, controlID: controlID, for: panelItem.id)
-            }
+            },
+            onHoverChange: handleSecondaryPanelHoverChange
         )
     }
 
-    private var attachedSecondaryPanelItemID: String? {
-        attachedSecondaryPanelItem?.id
+    private func handleNavigationHoverChange(
+        pluginID: String,
+        controlID: String,
+        optionID: String,
+        isHovering: Bool
+    ) {
+        if isHovering {
+            hoverCoordinator.hoverBegan(
+                pluginID: pluginID,
+                controlID: controlID,
+                optionID: optionID
+            )
+            pluginHost.setPanelNavigationSelectionValue(
+                optionID,
+                controlID: controlID,
+                for: pluginID
+            )
+            return
+        }
+
+        hoverCoordinator.hoverEnded(
+            pluginID: pluginID,
+            controlID: controlID,
+            optionID: optionID
+        )
     }
 
-    private var attachedSecondaryPanelItem: PluginPanelItem? {
-        pluginHost.panelItems.first { item in
-            guard item.detail?.secondaryPanel != nil else {
-                return false
-            }
+    private func handleSecondaryPanelHoverChange(_ isHovering: Bool) {
+        hoverCoordinator.setPanelHovered(isHovering)
+    }
 
-            if item.controlStyle == .disclosure {
-                return item.isExpanded
-            }
-
-            return true
+    private var activeSecondaryPanelSignature: String? {
+        guard
+            let activation = hoverCoordinator.activeActivation,
+            let panelItem = pluginHost.panelItems.first(where: { $0.id == activation.pluginID }),
+            let panel = panelItem.detail?.secondaryPanel
+        else {
+            return nil
         }
+
+        let controlIDs = panel.controls.map(\.id).joined(separator: ",")
+        return "\(activation.pluginID)|\(activation.optionID)|\(panel.title)|\(controlIDs)"
     }
 
     private var featureCards: some View {
@@ -146,7 +330,7 @@ struct MenuBarContent: View {
             ForEach(pluginHost.panelItems) { item in
                 FeatureRowView(
                     item: item,
-                    tracksSelectedNavigationRow: attachedSecondaryPanelItemID == item.id,
+                    tracksSelectedNavigationRow: hoverCoordinator.activeActivation?.pluginID == item.id,
                     isOn: Binding(
                         get: { pluginHost.isSwitchOn(for: item.id) },
                         set: { newValue in
@@ -162,9 +346,17 @@ struct MenuBarContent: View {
                     onNavigationSelectionChange: { controlID, optionID in
                         pluginHost.setPanelNavigationSelectionValue(optionID, controlID: controlID, for: item.id)
                     },
+                    onNavigationHoverChange: { controlID, optionID, isHovering in
+                        handleNavigationHoverChange(
+                            pluginID: item.id,
+                            controlID: controlID,
+                            optionID: optionID,
+                            isHovering: isHovering
+                        )
+                    },
                     onSelectedNavigationRowFrameChange: { frame in
-                        if attachedSecondaryPanelItemID == item.id {
-                            selectedNavigationRowFrame = frame
+                        if hoverCoordinator.activeActivation?.pluginID == item.id {
+                            hoverCoordinator.setSelectedRowFrame(frame)
                         }
                     },
                     onDateChange: { controlID, date in
@@ -173,16 +365,7 @@ struct MenuBarContent: View {
                 )
             }
         }
-        .padding(6)
         .frame(width: MenuBarPanelLayout.surfaceWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        )
     }
 
     private var settingsCard: some View {
@@ -194,8 +377,6 @@ struct MenuBarContent: View {
             }
             .buttonStyle(.plain)
 
-            Divider()
-
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
@@ -204,14 +385,6 @@ struct MenuBarContent: View {
             .buttonStyle(.plain)
         }
         .frame(width: MenuBarPanelLayout.surfaceWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        )
     }
 }
 
@@ -222,8 +395,10 @@ struct FeatureRowView: View {
     let onDisclosureToggle: (Bool) -> Void
     let onSelectionChange: (String, String) -> Void
     let onNavigationSelectionChange: (String, String) -> Void
+    let onNavigationHoverChange: (String, String, Bool) -> Void
     let onSelectedNavigationRowFrameChange: (CGRect?) -> Void
     let onDateChange: (String, Date) -> Void
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: detailToDisplay == nil ? 0 : 12) {
@@ -248,6 +423,7 @@ struct FeatureRowView: View {
                     showsSecondaryPanel: false,
                     onSelectionChange: onSelectionChange,
                     onNavigationSelectionChange: onNavigationSelectionChange,
+                    onNavigationHoverChange: onNavigationHoverChange,
                     onSelectedNavigationRowFrameChange: tracksSelectedNavigationRow ? onSelectedNavigationRowFrameChange : { _ in },
                     onDateChange: onDateChange
                 )
@@ -256,12 +432,14 @@ struct FeatureRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .frame(width: MenuBarPanelLayout.surfaceWidth, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(0.001))
-        )
-        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .center) {
+            RoundedRectangle(cornerRadius: MenuBarHoverStyle.cornerRadius, style: .continuous)
+                .inset(by: MenuBarHoverStyle.inset)
+                .fill(item.isEnabled && isHovered ? MenuBarHoverStyle.fill : Color.clear)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: MenuBarHoverStyle.cornerRadius, style: .continuous))
+        .onHover { isHovered = $0 }
         .help(item.helpText)
     }
 
@@ -269,11 +447,11 @@ struct FeatureRowView: View {
         HStack(alignment: .center, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(item.iconTint.opacity(0.14))
+                    .fill(Color.primary.opacity(0.08))
 
                 Image(systemName: item.iconName)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(item.iconTint)
+                    .foregroundStyle(.secondary)
             }
             .frame(width: FeatureRowLayout.iconSize, height: FeatureRowLayout.iconSize)
 
@@ -327,6 +505,7 @@ private struct PluginPanelDetailView: View {
     let showsSecondaryPanel: Bool
     let onSelectionChange: (String, String) -> Void
     let onNavigationSelectionChange: (String, String) -> Void
+    let onNavigationHoverChange: (String, String, Bool) -> Void
     let onSelectedNavigationRowFrameChange: (CGRect?) -> Void
     let onDateChange: (String, Date) -> Void
 
@@ -402,6 +581,9 @@ private struct PluginPanelDetailView: View {
                 onSelect: { optionID in
                     onNavigationSelectionChange(control.id, optionID)
                 },
+                onHoverChange: { optionID, isHovering in
+                    onNavigationHoverChange(control.id, optionID, isHovering)
+                },
                 onSelectedRowFrameChange: onSelectedNavigationRowFrameChange
             )
         }
@@ -468,7 +650,11 @@ private struct SelectListRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
-            .background(isInteractive && isHovered ? Color.primary.opacity(0.06) : Color.clear)
+            .background(alignment: .center) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .inset(by: MenuBarHoverStyle.inset)
+                    .fill(isInteractive && isHovered ? MenuBarHoverStyle.fill : Color.clear)
+            }
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -483,65 +669,125 @@ private struct SelectListRow: View {
 private struct NavigationListControl: View {
     let control: PluginPanelControl
     let onSelect: (String) -> Void
+    let onHoverChange: (String, Bool) -> Void
     let onSelectedRowFrameChange: (CGRect?) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(control.options) { option in
-                Button {
-                    onSelect(option.id)
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option.title)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.primary)
-
-                            if let subtitle = option.subtitle {
-                                Text(subtitle)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .opacity(option.id == control.selectedOptionID ? 1 : 0.35)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 9)
-                    .frame(minHeight: MenuBarPanelLayout.navigationRowHeight)
-                    .background(
-                        option.id == control.selectedOptionID
-                            ? Color.accentColor.opacity(0.10)
-                            : Color.clear
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!control.isEnabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    if option.id == control.selectedOptionID {
-                        SelectedRowFrameReader(onFrameChange: onSelectedRowFrameChange)
-                    }
-                }
+                NavigationListRow(
+                    title: option.title,
+                    subtitle: option.subtitle,
+                    isSelected: option.id == control.selectedOptionID,
+                    isEnabled: control.isEnabled,
+                    action: { onSelect(option.id) },
+                    onHoverChange: { isHovering in
+                        onHoverChange(option.id, isHovering)
+                    },
+                    onSelectedRowFrameChange: onSelectedRowFrameChange
+                )
             }
         }
     }
 }
 
+private struct NavigationListRow: View {
+    let title: String
+    let subtitle: String?
+    let isSelected: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+    let onHoverChange: (Bool) -> Void
+    let onSelectedRowFrameChange: (CGRect?) -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            guard isInteractive else {
+                return
+            }
+
+            action()
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .opacity(isSelected ? 1 : (isHovered ? 0.55 : 0.35))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(minHeight: MenuBarPanelLayout.navigationRowHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .center) {
+                RoundedRectangle(cornerRadius: MenuBarHoverStyle.navigationCornerRadius, style: .continuous)
+                    .inset(by: MenuBarHoverStyle.inset)
+                    .fill(backgroundFill)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: MenuBarHoverStyle.navigationCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            SelectedRowFrameReader(
+                isActive: isSelected,
+                onFrameChange: onSelectedRowFrameChange
+            )
+        }
+        .onHover { hovering in
+            isHovered = hovering
+            onHoverChange(hovering)
+
+            guard hovering, isInteractive else {
+                return
+            }
+
+            action()
+        }
+    }
+
+    private var isInteractive: Bool {
+        isEnabled && !isSelected
+    }
+
+    private var backgroundFill: Color {
+        if isSelected {
+            return MenuBarHoverStyle.navigationSelectedFill
+        }
+
+        if isHovered && isEnabled {
+            return MenuBarHoverStyle.navigationFill
+        }
+
+        return .clear
+    }
+}
+
 private struct SecondarySlidingPanel: View {
+    private static let cornerRadius: CGFloat = 14
+
     let title: String
     let controls: [PluginPanelControl]
     let onSelectionChange: (String, String) -> Void
     let onNavigationSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
+    let onHoverChange: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -554,25 +800,53 @@ private struct SecondarySlidingPanel: View {
                 showsSecondaryPanel: false,
                 onSelectionChange: onSelectionChange,
                 onNavigationSelectionChange: onNavigationSelectionChange,
+                onNavigationHoverChange: { _, _, _ in },
                 onSelectedNavigationRowFrameChange: { _ in },
                 onDateChange: onDateChange
             )
         }
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            PopoverMaterialBackground()
+        }
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: Self.cornerRadius,
+                style: .continuous
+            )
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: Self.cornerRadius,
+                style: .continuous
+            )
         )
+        .onHover(perform: onHoverChange)
     }
 }
 
 private final class SecondaryPanelWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+private struct PopoverMaterialBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: NSVisualEffectView) {
+        view.material = .popover
+        view.blendingMode = .behindWindow
+        view.state = .active
+    }
 }
 
 @MainActor
@@ -595,16 +869,34 @@ private final class SecondaryPanelController: ObservableObject {
     // - Apple Feedback FB11984872（无法程序化关闭 window-style MenuBarExtra）
     // - CocoaDev 「HowCanChildWindowBeKey」https://cocoadev.github.io/HowCanChildWindowBeKey/
 
-    weak var hostWindow: NSWindow?
+    private weak var hostWindow: NSWindow?
     private var panelWindow: SecondaryPanelWindow?
+    private var hostWindowObservers: [NSObjectProtocol] = []
+    var onHostWindowDismissRequest: (() -> Void)?
+
+    func setHostWindow(_ window: NSWindow?) {
+        guard hostWindow !== window else {
+            return
+        }
+
+        removeHostWindowObservers()
+        hostWindow = window
+
+        guard window != nil else {
+            hide()
+            return
+        }
+
+        observeHostWindowIfNeeded()
+    }
 
     func show(
         panel: PluginPanelSecondaryPanel,
-        pluginID: String,
         anchorRect: CGRect,
         onSelectionChange: @escaping (String, String) -> Void,
         onNavigationSelectionChange: @escaping (String, String) -> Void,
-        onDateChange: @escaping (String, Date) -> Void
+        onDateChange: @escaping (String, Date) -> Void,
+        onHoverChange: @escaping (Bool) -> Void
     ) {
         guard let hostWindow else { return }
         // MenuWindowAccessor.updateNSView 会在 .onDisappear 之后仍派发 async 回调，
@@ -617,7 +909,8 @@ private final class SecondaryPanelController: ObservableObject {
             controls: panel.controls,
             onSelectionChange: onSelectionChange,
             onNavigationSelectionChange: onNavigationSelectionChange,
-            onDateChange: onDateChange
+            onDateChange: onDateChange,
+            onHoverChange: onHoverChange
         )
         .frame(width: MenuBarPanelLayout.secondaryPanelWidth)
 
@@ -655,12 +948,11 @@ private final class SecondaryPanelController: ObservableObject {
             defer: false
         )
         panel.isFloatingPanel = true
-        // 必须保持为 false：在 `.nonactivatingPanel` + 菜单栏 app 的组合下，
-        // `hidesOnDeactivate = true` 会让这个 panel 在 orderFront 之后陷入
-        // 「NSWindow.isVisible 仍为 true 但实际像素不上屏」的半死状态，侧栏完全
-        // 看不见（被 popover 右侧的其他 app 窗口内容透出来）。
-        // 侧栏生命周期已经由 MenuBarContent.onDisappear → SecondaryPanelController.hide()
-        // 负责级联清理，不需要 hidesOnDeactivate 作为兜底。
+        // 必须保持为 false：对 LSUIElement 菜单栏应用来说，MenuBarExtra 展开时
+        // 应用常处于非激活态，但菜单本身仍可交互。若开启 hidesOnDeactivate，
+        // 侧栏会在展示后立即隐藏，甚至陷入 isVisible 仍为 true 但实际像素不上屏
+        // 的半死状态。侧栏生命周期统一由 MenuBarContent 的 onDisappear /
+        // syncSecondaryPanelWindow 来驱动 hide()。
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -668,6 +960,42 @@ private final class SecondaryPanelController: ObservableObject {
         panel.isMovable = false
         panel.isReleasedWhenClosed = false
         return panel
+    }
+
+    private func observeHostWindowIfNeeded() {
+        guard let hostWindow else {
+            return
+        }
+
+        let notificationCenter = NotificationCenter.default
+        hostWindowObservers = [
+            notificationCenter.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: hostWindow,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.hide()
+                    self?.onHostWindowDismissRequest?()
+                }
+            },
+            notificationCenter.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: hostWindow,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.hide()
+                    self?.onHostWindowDismissRequest?()
+                }
+            }
+        ]
+    }
+
+    private func removeHostWindowObservers() {
+        let notificationCenter = NotificationCenter.default
+        hostWindowObservers.forEach(notificationCenter.removeObserver)
+        hostWindowObservers.removeAll()
     }
 }
 
@@ -690,6 +1018,7 @@ private struct MenuWindowAccessor: NSViewRepresentable {
 }
 
 private struct SelectedRowFrameReader: NSViewRepresentable {
+    let isActive: Bool
     let onFrameChange: (CGRect?) -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -707,6 +1036,11 @@ private struct SelectedRowFrameReader: NSViewRepresentable {
     }
 
     private func updateFrame(for view: NSView) {
+        guard isActive else {
+            onFrameChange(nil)
+            return
+        }
+
         guard let window = view.window else {
             onFrameChange(nil)
             return
@@ -752,6 +1086,8 @@ private struct DateTimeCardPicker: View {
 private struct MenuActionRowLabel: View {
     let title: String
     let systemImage: String
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -774,6 +1110,12 @@ private struct MenuActionRowLabel: View {
             maxHeight: 38,
             alignment: .leading
         )
-        .contentShape(Rectangle())
+        .background(alignment: .center) {
+            RoundedRectangle(cornerRadius: MenuBarHoverStyle.cornerRadius, style: .continuous)
+                .inset(by: MenuBarHoverStyle.inset)
+                .fill(isEnabled && isHovered ? MenuBarHoverStyle.fill : Color.clear)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: MenuBarHoverStyle.cornerRadius, style: .continuous))
+        .onHover { isHovered = $0 }
     }
 }

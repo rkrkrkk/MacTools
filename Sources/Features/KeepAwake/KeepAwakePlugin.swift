@@ -91,7 +91,7 @@ final class KeepAwakePlugin: FeaturePlugin {
         switch action {
         case let .setSwitch(isEnabled):
             setKeepAwakeEnabled(isEnabled)
-        case .setDisclosureExpanded, .setNavigationSelection:
+        case .setDisclosureExpanded, .setNavigationSelection, .clearNavigationSelection:
             return
         case let .setSelection(controlID, optionID):
             guard controlID == ControlID.duration else {

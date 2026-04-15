@@ -43,11 +43,11 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
         XCTAssertEqual(secondary.controls.first?.kind, .selectList)
     }
 
-    func testSelectingSameDisplayTwiceClosesSecondaryPanel() {
+    func testClearingNavigationSelectionClosesSecondaryPanel() {
         let plugin = makePlugin()
         plugin.handlePanelAction(.setDisclosureExpanded(true))
         plugin.handlePanelAction(.setNavigationSelection(controlID: "display-navigation", optionID: "2"))
-        plugin.handlePanelAction(.setNavigationSelection(controlID: "display-navigation", optionID: "2"))
+        plugin.handlePanelAction(.clearNavigationSelection(controlID: "display-navigation"))
 
         XCTAssertNil(plugin.panelState.detail?.secondaryPanel)
     }

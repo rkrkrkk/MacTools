@@ -11,6 +11,7 @@ enum PluginPanelAction: Equatable {
     case setDisclosureExpanded(Bool)
     case setSelection(controlID: String, optionID: String)
     case setNavigationSelection(controlID: String, optionID: String)
+    case clearNavigationSelection(controlID: String)
     case setDate(controlID: String, value: Date)
 }
 
