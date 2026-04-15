@@ -9,6 +9,9 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "14.0"
+    scheme:
+      testTargets:
+        - MacToolsTests
     configFiles:
       Debug: Configs/Debug.xcconfig
       Release: Configs/Release.xcconfig
