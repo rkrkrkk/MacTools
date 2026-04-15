@@ -41,6 +41,13 @@ struct MenuBarContent: View {
                                 for: item.id
                             )
                         },
+                        onNavigationSelectionChange: { controlID, optionID in
+                            pluginHost.setPanelNavigationSelectionValue(
+                                optionID,
+                                controlID: controlID,
+                                for: item.id
+                            )
+                        },
                         onDateChange: { controlID, date in
                             pluginHost.setPanelDateValue(
                                 date,
@@ -134,6 +141,7 @@ struct FeatureRowView: View {
     @Binding var isOn: Bool
     let onDisclosureToggle: (Bool) -> Void
     let onSelectionChange: (String, String) -> Void
+    let onNavigationSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
 
     var body: some View {
@@ -155,6 +163,7 @@ struct FeatureRowView: View {
                 PluginPanelDetailView(
                     detail: detail,
                     onSelectionChange: onSelectionChange,
+                    onNavigationSelectionChange: onNavigationSelectionChange,
                     onDateChange: onDateChange
                 )
                 .padding(.leading, FeatureRowLayout.detailLeadingInset)
@@ -228,72 +237,96 @@ struct FeatureRowView: View {
 private struct PluginPanelDetailView: View {
     let detail: PluginPanelDetail
     let onSelectionChange: (String, String) -> Void
+    let onNavigationSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(detail.controls) { control in
-                switch control.kind {
-                case .segmented:
-                    Picker(
-                        String(),
-                        selection: Binding(
-                            get: { control.selectedOptionID ?? "" },
-                            set: { newValue in
-                                onSelectionChange(control.id, newValue)
-                            }
-                        )
-                    ) {
-                        ForEach(control.options) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .disabled(!control.isEnabled)
-                case .datePicker:
-                    switch control.datePickerStyle ?? .compact {
-                    case .compact:
-                        DatePicker(
-                            String(),
-                            selection: Binding(
-                                get: { control.dateValue ?? Date() },
-                                set: { newValue in
-                                    onDateChange(control.id, newValue)
-                                }
-                            ),
-                            in: (control.minimumDate ?? Date())...,
-                            displayedComponents: control.displayedComponents ?? [.date, .hourAndMinute]
-                        )
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .disabled(!control.isEnabled)
-                    case .dateTimeCard:
-                        DateTimeCardPicker(
-                            selection: Binding(
-                                get: { control.dateValue ?? Date() },
-                                set: { newValue in
-                                    onDateChange(control.id, newValue)
-                                }
-                            ),
-                            minimumDate: control.minimumDate ?? Date(),
-                            isEnabled: control.isEnabled
-                        )
-                    }
-                case .selectList:
-                    SelectListControl(
-                        control: control,
-                        onSelect: { optionID in
-                            onSelectionChange(control.id, optionID)
-                        }
-                    )
-                case .navigationList:
-                    EmptyView()
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(detail.primaryControls) { control in
+                    panelControl(control)
                 }
             }
+
+            if let secondaryPanel = detail.secondaryPanel {
+                SecondarySlidingPanel(
+                    title: secondaryPanel.title,
+                    controls: secondaryPanel.controls,
+                    onSelectionChange: onSelectionChange,
+                    onDateChange: onDateChange
+                )
+                .frame(width: 220)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: detail.secondaryPanel?.title)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func panelControl(_ control: PluginPanelControl) -> some View {
+        switch control.kind {
+        case .segmented:
+            Picker(
+                String(),
+                selection: Binding(
+                    get: { control.selectedOptionID ?? "" },
+                    set: { newValue in
+                        onSelectionChange(control.id, newValue)
+                    }
+                )
+            ) {
+                ForEach(control.options) { option in
+                    Text(option.title).tag(option.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .disabled(!control.isEnabled)
+        case .datePicker:
+            switch control.datePickerStyle ?? .compact {
+            case .compact:
+                DatePicker(
+                    String(),
+                    selection: Binding(
+                        get: { control.dateValue ?? Date() },
+                        set: { newValue in
+                            onDateChange(control.id, newValue)
+                        }
+                    ),
+                    in: (control.minimumDate ?? Date())...,
+                    displayedComponents: control.displayedComponents ?? [.date, .hourAndMinute]
+                )
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .disabled(!control.isEnabled)
+            case .dateTimeCard:
+                DateTimeCardPicker(
+                    selection: Binding(
+                        get: { control.dateValue ?? Date() },
+                        set: { newValue in
+                            onDateChange(control.id, newValue)
+                        }
+                    ),
+                    minimumDate: control.minimumDate ?? Date(),
+                    isEnabled: control.isEnabled
+                )
+            }
+        case .selectList:
+            SelectListControl(
+                control: control,
+                onSelect: { optionID in
+                    onSelectionChange(control.id, optionID)
+                }
+            )
+        case .navigationList:
+            NavigationListControl(
+                control: control,
+                onSelect: { optionID in
+                    onNavigationSelectionChange(control.id, optionID)
+                }
+            )
+        }
     }
 }
 
@@ -366,6 +399,83 @@ private struct SelectListRow: View {
 
     private var isInteractive: Bool {
         isEnabled && !isSelected
+    }
+}
+
+private struct NavigationListControl: View {
+    let control: PluginPanelControl
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(control.options) { option in
+                Button {
+                    onSelect(option.id)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option.title)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.primary)
+
+                            if let subtitle = option.subtitle {
+                                Text(subtitle)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .opacity(option.id == control.selectedOptionID ? 1 : 0.35)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .background(
+                        option.id == control.selectedOptionID
+                            ? Color.accentColor.opacity(0.10)
+                            : Color.clear
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!control.isEnabled)
+            }
+        }
+    }
+}
+
+private struct SecondarySlidingPanel: View {
+    let title: String
+    let controls: [PluginPanelControl]
+    let onSelectionChange: (String, String) -> Void
+    let onDateChange: (String, Date) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            PluginPanelDetailView(
+                detail: PluginPanelDetail(primaryControls: controls, secondaryPanel: nil),
+                onSelectionChange: onSelectionChange,
+                onNavigationSelectionChange: { _, _ in },
+                onDateChange: onDateChange
+            )
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        )
     }
 }
 
