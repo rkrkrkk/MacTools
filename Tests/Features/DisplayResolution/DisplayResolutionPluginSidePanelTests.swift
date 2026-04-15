@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class DisplayResolutionPluginSidePanelTests: XCTestCase {
+    func testNavigationOmitsDisplaysWithoutVisibleModes() throws {
+        let controller = MockDisplayResolutionController()
+        controller.displays = [
+            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
+            DisplayInfo(id: 4, name: "Projector", isBuiltin: false, isMain: false)
+        ]
+        controller.modesByDisplayID = [
+            2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)],
+            4: []
+        ]
+
+        let plugin = DisplayResolutionPlugin(controller: controller)
+        plugin.handlePanelAction(.setDisclosureExpanded(true))
+
+        let navigation = try XCTUnwrap(plugin.panelState.detail?.primaryControls.first)
+        XCTAssertEqual(navigation.options.map(\.id), ["2"])
+    }
+
     func testExpandedStateShowsDisplayNavigationAndNoSecondaryPanelByDefault() throws {
         let plugin = makePlugin()
         plugin.handlePanelAction(.setDisclosureExpanded(true))
@@ -34,6 +52,34 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
         XCTAssertNil(plugin.panelState.detail?.secondaryPanel)
     }
 
+    func testSelectingResolutionInSecondaryPanelAppliesModeOnSelectedDisplay() throws {
+        let controller = MockDisplayResolutionController()
+        controller.displays = [
+            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
+            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+        ]
+        controller.modesByDisplayID = [
+            2: [
+                makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true),
+                makeMode(modeId: 12, width: 2560, height: 1440)
+            ],
+            3: [
+                makeMode(modeId: 12, width: 3008, height: 1692, isCurrent: true)
+            ]
+        ]
+
+        let plugin = DisplayResolutionPlugin(controller: controller)
+        plugin.handlePanelAction(.setDisclosureExpanded(true))
+        plugin.handlePanelAction(.setNavigationSelection(controlID: "display-navigation", optionID: "2"))
+
+        let controlID = try XCTUnwrap(plugin.panelState.detail?.secondaryPanel?.controls.first?.id)
+        plugin.handlePanelAction(.setSelection(controlID: controlID, optionID: "12"))
+
+        XCTAssertEqual(controller.applyCalls.count, 1)
+        XCTAssertEqual(controller.applyCalls[0].displayID, 2)
+        XCTAssertEqual(controller.applyCalls[0].modeId, 12)
+    }
+
     func testCollapsingPluginClearsSelectedDisplay() {
         let plugin = makePlugin()
         plugin.handlePanelAction(.setDisclosureExpanded(true))
@@ -48,17 +94,25 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testMissingSelectedDisplayClearsSecondaryPanel() {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true)
+            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
+            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
         ]
-        controller.modesByDisplayID = [2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)]]
+        controller.modesByDisplayID = [
+            2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)],
+            3: [makeMode(modeId: 30, width: 3008, height: 1692, isCurrent: true)]
+        ]
 
         let plugin = DisplayResolutionPlugin(controller: controller)
         plugin.handlePanelAction(.setDisclosureExpanded(true))
         plugin.handlePanelAction(.setNavigationSelection(controlID: "display-navigation", optionID: "2"))
 
-        controller.displays = []
+        controller.displays = [
+            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+        ]
 
         XCTAssertNil(plugin.panelState.detail?.secondaryPanel)
+        XCTAssertNil(plugin.panelState.detail?.primaryControls.first?.selectedOptionID)
+        XCTAssertEqual(plugin.panelState.detail?.primaryControls.first?.options.map(\.id), ["3"])
     }
 
     private func makePlugin() -> DisplayResolutionPlugin {
@@ -102,8 +156,14 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
 
 @MainActor
 private final class MockDisplayResolutionController: DisplayResolutionControlling {
+    struct ApplyCall: Equatable {
+        let displayID: CGDirectDisplayID
+        let modeId: Int32
+    }
+
     var displays: [DisplayInfo] = []
     var modesByDisplayID: [CGDirectDisplayID: [DisplayResolutionInfo]] = [:]
+    var applyCalls: [ApplyCall] = []
 
     func listConnectedDisplays() -> [DisplayInfo] { displays }
 
@@ -115,6 +175,7 @@ private final class MockDisplayResolutionController: DisplayResolutionControllin
         _ info: DisplayResolutionInfo,
         for displayID: CGDirectDisplayID
     ) -> Result<Void, DisplayResolutionError> {
-        .success(())
+        applyCalls.append(ApplyCall(displayID: displayID, modeId: info.modeId))
+        return .success(())
     }
 }

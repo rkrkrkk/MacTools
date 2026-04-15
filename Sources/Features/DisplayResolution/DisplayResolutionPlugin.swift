@@ -34,8 +34,15 @@ final class DisplayResolutionPlugin: FeaturePlugin {
 
     var panelState: PluginPanelState {
         let displays = controller.listConnectedDisplays()
+        let panelDisplays = displays.compactMap { display -> PanelDisplay? in
+            let modes = Self.visibleModes(controller.listAvailableResolutions(for: display.id))
+            guard !modes.isEmpty else {
+                return nil
+            }
+            return PanelDisplay(display: display, modes: modes)
+        }
 
-        if !displays.contains(where: { $0.id == selectedDisplayID }) {
+        if !panelDisplays.contains(where: { $0.display.id == selectedDisplayID }) {
             selectedDisplayID = nil
         }
 
@@ -58,7 +65,7 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             isExpanded: isExpanded,
             isEnabled: true,
             isVisible: true,
-            detail: isExpanded ? buildDetail(for: displays) : nil,
+            detail: isExpanded ? buildDetail(for: panelDisplays) : nil,
             errorMessage: lastErrorMessage
         )
     }
@@ -164,19 +171,16 @@ final class DisplayResolutionPlugin: FeaturePlugin {
         return "\(displays.count) 个显示器"
     }
 
-    private func buildDetail(for displays: [DisplayInfo]) -> PluginPanelDetail {
+    private func buildDetail(for displays: [PanelDisplay]) -> PluginPanelDetail {
         let displayNavigation = PluginPanelControl(
             id: ControlID.displayNavigation,
             kind: .navigationList,
             options: displays.map { display in
-                let currentSummary = controller
-                    .listAvailableResolutions(for: display.id)
-                    .first(where: { $0.isCurrent })?
-                    .displayTitle ?? "未知"
+                let currentSummary = display.modes.first(where: { $0.isCurrent })?.displayTitle ?? "未知"
 
                 return PluginPanelControlOption(
-                    id: String(display.id),
-                    title: display.name,
+                    id: String(display.display.id),
+                    title: display.display.name,
                     subtitle: currentSummary
                 )
             },
@@ -190,26 +194,21 @@ final class DisplayResolutionPlugin: FeaturePlugin {
         )
 
         let secondaryPanel = selectedDisplayID.flatMap { selectedID -> PluginPanelSecondaryPanel? in
-            guard let display = displays.first(where: { $0.id == selectedID }) else {
-                return nil
-            }
-
-            let modes = Self.visibleModes(controller.listAvailableResolutions(for: selectedID))
-            guard !modes.isEmpty else {
+            guard let display = displays.first(where: { $0.display.id == selectedID }) else {
                 return nil
             }
 
             let resolutionControl = PluginPanelControl(
                 id: "display.\(selectedID)",
                 kind: .selectList,
-                options: modes.map {
+                options: display.modes.map {
                     PluginPanelControlOption(
                         id: String($0.modeId),
                         title: Self.optionTitle(for: $0),
                         subtitle: nil
                     )
                 },
-                selectedOptionID: modes.first(where: { $0.isCurrent }).map { String($0.modeId) },
+                selectedOptionID: display.modes.first(where: { $0.isCurrent }).map { String($0.modeId) },
                 dateValue: nil,
                 minimumDate: nil,
                 displayedComponents: nil,
@@ -218,7 +217,7 @@ final class DisplayResolutionPlugin: FeaturePlugin {
                 isEnabled: true
             )
 
-            return PluginPanelSecondaryPanel(title: display.name, controls: [resolutionControl])
+            return PluginPanelSecondaryPanel(title: display.display.name, controls: [resolutionControl])
         }
 
         return PluginPanelDetail(
@@ -238,4 +237,9 @@ final class DisplayResolutionPlugin: FeaturePlugin {
         lastErrorMessage = "切换失败：\(error.localizedDescription)"
         onStateChange?()
     }
+}
+
+private struct PanelDisplay {
+    let display: DisplayInfo
+    let modes: [DisplayResolutionInfo]
 }
