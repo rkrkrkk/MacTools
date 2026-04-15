@@ -6,11 +6,15 @@ enum PluginControlStyle {
     case disclosure
 }
 
-enum PluginPanelAction {
+enum PluginPanelAction: Equatable {
     case setSwitch(Bool)
     case setDisclosureExpanded(Bool)
     case setSelection(controlID: String, optionID: String)
     case setDate(controlID: String, value: Date)
+
+    static func setNavigationSelection(controlID: String, optionID: String) -> Self {
+        .setSelection(controlID: controlID, optionID: optionID)
+    }
 }
 
 enum PluginPanelDescriptionTone {
@@ -64,6 +68,8 @@ enum PluginPanelControlKind {
     case segmented
     case datePicker
     case selectList
+
+    static let navigationList = Self.selectList
 }
 
 enum PluginPanelDatePickerStyle {
@@ -71,9 +77,16 @@ enum PluginPanelDatePickerStyle {
     case dateTimeCard
 }
 
-struct PluginPanelControlOption: Identifiable {
+struct PluginPanelControlOption: Identifiable, Equatable {
     let id: String
     let title: String
+    let subtitle: String?
+
+    init(id: String, title: String, subtitle: String? = nil) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+    }
 }
 
 struct PluginPanelControl: Identifiable {
@@ -89,8 +102,27 @@ struct PluginPanelControl: Identifiable {
     let isEnabled: Bool
 }
 
-struct PluginPanelDetail {
+struct PluginPanelSecondaryPanel {
+    let title: String
     let controls: [PluginPanelControl]
+}
+
+struct PluginPanelDetail {
+    let primaryControls: [PluginPanelControl]
+    let secondaryPanel: PluginPanelSecondaryPanel?
+
+    var controls: [PluginPanelControl] {
+        primaryControls
+    }
+
+    init(primaryControls: [PluginPanelControl], secondaryPanel: PluginPanelSecondaryPanel?) {
+        self.primaryControls = primaryControls
+        self.secondaryPanel = secondaryPanel
+    }
+
+    init(controls: [PluginPanelControl]) {
+        self.init(primaryControls: controls, secondaryPanel: nil)
+    }
 }
 
 struct PluginPermissionRequirement: Identifiable {

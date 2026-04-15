@@ -124,9 +124,9 @@ final class KeepAwakePlugin: FeaturePlugin {
                 id: ControlID.duration,
                 kind: .segmented,
                 options: [
-                    PluginPanelControlOption(id: DurationOptionID.forever, title: "永不"),
-                    PluginPanelControlOption(id: DurationOptionID.thirtyMinutes, title: "30min"),
-                    PluginPanelControlOption(id: DurationOptionID.custom, title: "自定义")
+                    PluginPanelControlOption(id: DurationOptionID.forever, title: "永不", subtitle: nil),
+                    PluginPanelControlOption(id: DurationOptionID.thirtyMinutes, title: "30min", subtitle: nil),
+                    PluginPanelControlOption(id: DurationOptionID.custom, title: "自定义", subtitle: nil)
                 ],
                 selectedOptionID: selectedDurationPreset.rawValue,
                 dateValue: nil,
@@ -155,7 +155,7 @@ final class KeepAwakePlugin: FeaturePlugin {
             )
         }
 
-        return PluginPanelDetail(controls: controls)
+        return PluginPanelDetail(primaryControls: controls, secondaryPanel: nil)
     }
 
     private func setKeepAwakeEnabled(_ isEnabled: Bool) {

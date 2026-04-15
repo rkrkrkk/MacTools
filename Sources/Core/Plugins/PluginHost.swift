@@ -120,6 +120,21 @@ final class PluginHost: ObservableObject {
         rebuildDerivedState()
     }
 
+    func setPanelNavigationSelectionValue(
+        _ optionID: String,
+        controlID: String,
+        for pluginID: String
+    ) {
+        guard let plugin = plugin(for: pluginID) else {
+            return
+        }
+
+        plugin.handlePanelAction(
+            .setNavigationSelection(controlID: controlID, optionID: optionID)
+        )
+        rebuildDerivedState()
+    }
+
     func setPanelDateValue(
         _ date: Date,
         controlID: String,
