@@ -10,10 +10,16 @@ enum AppMetadata {
             ?? "MacTools"
     }
 
+    static var shortVersion: String {
+        bundleString("CFBundleShortVersionString") ?? "0.3.0"
+    }
+
+    static var buildNumber: String {
+        bundleString(kCFBundleVersionKey as String) ?? "3"
+    }
+
     static var versionDescription: String {
-        let shortVersion = bundleString("CFBundleShortVersionString") ?? "0.2.0"
-        let buildNumber = bundleString(kCFBundleVersionKey as String) ?? "2"
-        return "\(shortVersion) (\(buildNumber))"
+        formattedVersionDescription(shortVersion: shortVersion, buildNumber: buildNumber)
     }
 
     static var repositoryURL: URL {
@@ -22,10 +28,6 @@ enum AppMetadata {
 
     static var aboutDescription: String {
         "一款免费、开源的 macOS 菜单栏工具集合。\n使用 SwiftUI 构建。"
-    }
-
-    static var authorDescription: String {
-        "项目地址"
     }
 
     static var appIcon: NSImage? {
@@ -39,5 +41,9 @@ enum AppMetadata {
 
     private static func bundleString(_ key: String) -> String? {
         Bundle.main.object(forInfoDictionaryKey: key) as? String
+    }
+
+    static func formattedVersionDescription(shortVersion: String, buildNumber: String) -> String {
+        "\(shortVersion) (\(buildNumber))"
     }
 }

@@ -9,6 +9,7 @@ PROJECT_FILE="$ROOT_DIR/MacTools.xcodeproj"
 APP_NAME="MacTools"
 SCHEME="MacTools"
 CONFIG_FILE="${RELEASE_CONFIG_FILE:-$SCRIPT_DIR/release.local.env}"
+DEFAULT_GITHUB_REPOSITORY="ggbond268/MacTools"
 
 VERSION=""
 BUILD_NUMBER=""
@@ -51,6 +52,7 @@ Environment:
     APPLE_NOTARY_PROFILE
     GITHUB_REPOSITORY
     DMG_SIGNING_IDENTIFIER (optional)
+    SPARKLE_KEYCHAIN_ACCOUNT (optional)
 EOF
 }
 
@@ -180,9 +182,81 @@ function git_repository() {
       printf '%s\n' "${remote_url%.git}"
       ;;
     *)
-      return 1
+      printf '%s\n' "$DEFAULT_GITHUB_REPOSITORY"
       ;;
   esac
+}
+
+function sparkle_bin_dir() {
+  local bin_dir="${SPARKLE_BIN_DIR:-$DERIVED_DATA/SourcePackages/artifacts/sparkle/Sparkle/bin}"
+  [[ -x "$bin_dir/sign_update" ]] || fail "未找到 Sparkle 工具链：$bin_dir
+
+请先执行一次 xcodebuild / make build，让 Xcode 拉取 Sparkle 包依赖后再发布。"
+  printf '%s\n' "$bin_dir"
+}
+
+function sparkle_signature() {
+  local dmg_path="$1"
+  local bin_dir signature
+  bin_dir="$(sparkle_bin_dir)"
+  signature="$("$bin_dir/sign_update" --account "${SPARKLE_KEYCHAIN_ACCOUNT:-ed25519}" -p "$dmg_path")" \
+    || fail "无法使用 Sparkle EdDSA 私钥为 DMG 签名。
+
+请先运行：
+  $(sparkle_bin_dir)/generate_keys
+
+然后允许 Sparkle 访问本机钥匙串中的更新签名密钥。"
+
+  [[ -n "$signature" ]] || fail "Sparkle EdDSA 签名结果为空。"
+  printf '%s\n' "$signature"
+}
+
+function release_download_url() {
+  local repository="$1"
+  printf 'https://github.com/%s/releases/download/%s/%s.dmg\n' "$repository" "$TAG" "$APP_NAME"
+}
+
+function release_notes_url() {
+  local repository="$1"
+  printf 'https://github.com/%s/releases/tag/%s\n' "$repository" "$TAG"
+}
+
+function write_appcast() {
+  local dmg_path="$1"
+  local repository download_url notes_url signature file_size pub_date minimum_system_version
+
+  repository="$(git_repository)"
+  download_url="$(release_download_url "$repository")"
+  notes_url="$(release_notes_url "$repository")"
+  signature="$(sparkle_signature "$dmg_path")"
+  file_size="$(stat -f '%z' "$dmg_path")"
+  pub_date="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+  minimum_system_version="${SPARKLE_MINIMUM_SYSTEM_VERSION:-14.0}"
+
+  mkdir -p "$DOCS_DIR"
+
+  cat >"$APPCAST_PATH" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>${APP_NAME} Releases</title>
+        <description>Latest release metadata for ${APP_NAME}.</description>
+        <language>zh-CN</language>
+        <item>
+            <title>Version ${VERSION}</title>
+            <link>${notes_url}</link>
+            <sparkle:version>${BUILD_NUMBER}</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>${notes_url}</sparkle:releaseNotesLink>
+            <pubDate>${pub_date}</pubDate>
+            <enclosure url="${download_url}" length="${file_size}" type="application/octet-stream" sparkle:edSignature="${signature}" />
+            <sparkle:minimumSystemVersion>${minimum_system_version}</sparkle:minimumSystemVersion>
+        </item>
+    </channel>
+</rss>
+EOF
+
+  info "Appcast updated: $APPCAST_PATH"
 }
 
 function ensure_clean_git() {
@@ -224,6 +298,48 @@ function sign_path() {
     "$path"
 }
 
+function sign_path_preserving_entitlements() {
+  local path="$1"
+  /usr/bin/codesign \
+    --force \
+    --sign "$DEVELOPER_ID_APPLICATION" \
+    --options runtime \
+    --timestamp \
+    --preserve-metadata=entitlements \
+    "$path"
+}
+
+function is_inside_sparkle_framework() {
+  local path="$1"
+  [[ "$path" == *"/Sparkle.framework" || "$path" == *"/Sparkle.framework/"* ]]
+}
+
+function sign_sparkle_framework() {
+  local app_path="$1"
+  local sparkle_framework="$app_path/Contents/Frameworks/Sparkle.framework"
+  local sparkle_current="$sparkle_framework/Versions/Current"
+
+  [[ -d "$sparkle_framework" ]] || return 0
+
+  if [[ -d "$sparkle_current/XPCServices/Installer.xpc" ]]; then
+    sign_path "$sparkle_current/XPCServices/Installer.xpc"
+  fi
+
+  if [[ -d "$sparkle_current/XPCServices/Downloader.xpc" ]]; then
+    sign_path_preserving_entitlements "$sparkle_current/XPCServices/Downloader.xpc"
+  fi
+
+  if [[ -f "$sparkle_current/Autoupdate" ]]; then
+    sign_path "$sparkle_current/Autoupdate"
+  fi
+
+  if [[ -d "$sparkle_current/Updater.app" ]]; then
+    sign_path "$sparkle_current/Updater.app"
+  fi
+
+  sign_path "$sparkle_framework"
+}
+
 function app_bundle_identifier() {
   local app_path="$1"
   /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app_path/Contents/Info.plist" 2>/dev/null \
@@ -252,8 +368,13 @@ function sign_app_bundle() {
 
     while IFS= read -r bundle; do
       [[ -n "$bundle" ]] || continue
+      if is_inside_sparkle_framework "$bundle"; then
+        continue
+      fi
       sign_path "$bundle"
     done < <(find "$app_path/Contents" -depth -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print)
+
+    sign_sparkle_framework "$app_path"
   fi
 
   sign_path "$app_path"
@@ -346,7 +467,7 @@ function require_existing_dmg() {
   [[ -f "$dmg_path" ]] || fail "未找到现有 DMG：$dmg_path
 
 如果你想先构建并公证新包，请直接运行：
-  ./scripts/release-local.sh --version ${VERSION:-0.2.0}
+  ./scripts/release-local.sh --version ${VERSION:-0.3.0}
 
 如果你已经做过一次完整发布，请确认要上传的 DMG 仍在上面的路径。"
 }
@@ -403,6 +524,8 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 SIGNED_APP_PATH="$ARTIFACT_DIR/$APP_NAME.app"
 DMG_PATH="$ARTIFACT_DIR/$APP_NAME.dmg"
 DMG_IDENTIFIER=""
+DOCS_DIR="$ROOT_DIR/docs"
+APPCAST_PATH="$DOCS_DIR/appcast.xml"
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -452,10 +575,18 @@ info "SHA256: $DMG_SHA256"
 
 if [[ "$PUBLISH" -eq 1 ]]; then
   publish_release "$DMG_PATH"
+  write_appcast "$DMG_PATH"
+  info "Appcast updated after GitHub Release publish: $APPCAST_PATH"
 fi
 
 if [[ "$PUBLISH_EXISTING" -eq 1 ]]; then
   publish_release "$DMG_PATH"
+  write_appcast "$DMG_PATH"
+  info "Appcast updated after existing artifact publish: $APPCAST_PATH"
+fi
+
+if [[ "$PUBLISH" -eq 0 && "$PUBLISH_EXISTING" -eq 0 ]]; then
+  info "Skipping appcast update because this run did not publish a GitHub Release."
 fi
 
 info "Done"

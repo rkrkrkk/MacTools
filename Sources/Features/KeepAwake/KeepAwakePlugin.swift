@@ -5,25 +5,42 @@ import SwiftUI
 @MainActor
 final class KeepAwakePlugin: FeaturePlugin {
     private enum Timing {
-        static let defaultCustomLeadTime: TimeInterval = 60
-        static let minimumCustomLeadTime: TimeInterval = 1
+        static let secondsPerMinute: TimeInterval = 60
     }
 
     private enum ControlID {
         static let duration = "duration"
-        static let customEndDate = "customEndDate"
     }
 
     private enum DurationPreset: String {
         case forever
         case thirtyMinutes
-        case custom
+        case oneHour
+        case twoHours
+        case fiveHours
+
+        var timeInterval: TimeInterval? {
+            switch self {
+            case .forever:
+                return nil
+            case .thirtyMinutes:
+                return 30 * 60
+            case .oneHour:
+                return 60 * 60
+            case .twoHours:
+                return 2 * 60 * 60
+            case .fiveHours:
+                return 5 * 60 * 60
+            }
+        }
     }
 
     private enum DurationOptionID {
         static let forever = DurationPreset.forever.rawValue
         static let thirtyMinutes = DurationPreset.thirtyMinutes.rawValue
-        static let custom = DurationPreset.custom.rawValue
+        static let oneHour = DurationPreset.oneHour.rawValue
+        static let twoHours = DurationPreset.twoHours.rawValue
+        static let fiveHours = DurationPreset.fiveHours.rawValue
     }
 
     let manifest = PluginManifest(
@@ -34,7 +51,7 @@ final class KeepAwakePlugin: FeaturePlugin {
         controlStyle: .switch,
         menuActionBehavior: .keepPresented,
         order: 50,
-        defaultDescription: "允许息屏，阻止系统因空闲进入休眠"
+        defaultDescription: "阻止系统空闲休眠，允许显示器息屏"
     )
 
     var onStateChange: (() -> Void)?
@@ -45,7 +62,8 @@ final class KeepAwakePlugin: FeaturePlugin {
     private var lastErrorMessage: String?
     private var session: KeepAwakeSession?
     private var selectedDurationPreset: DurationPreset = .forever
-    private var customEndDate: Date?
+    private var scheduledEndDate: Date?
+    private var subtitleRefreshTimer: Timer?
 
     var panelState: PluginPanelState {
         PluginPanelState(
@@ -65,7 +83,9 @@ final class KeepAwakePlugin: FeaturePlugin {
 
     var shortcutDefinitions: [PluginShortcutDefinition] { [] }
 
-    func refresh() {}
+    func refresh() {
+        scheduleSubtitleRefreshIfNeeded()
+    }
 
     func handlePanelAction(_ action: PluginPanelAction) {
         switch action {
@@ -79,12 +99,8 @@ final class KeepAwakePlugin: FeaturePlugin {
             }
 
             updateDurationPreset(using: optionID)
-        case let .setDate(controlID, value):
-            guard controlID == ControlID.customEndDate else {
-                return
-            }
-
-            updateCustomEndDate(value)
+        case .setDate:
+            return
         }
     }
 
@@ -103,14 +119,11 @@ final class KeepAwakePlugin: FeaturePlugin {
             return manifest.defaultDescription
         }
 
-        switch selectedDurationPreset {
-        case .forever:
+        guard let scheduledEndDate else {
             return "已启用"
-        case .thirtyMinutes:
-            return "30 分钟后自动停止"
-        case .custom:
-            return "至 \(formattedEndDate(referenceDate: Date())) 自动停止"
         }
+
+        return remainingTimeDescription(until: scheduledEndDate, referenceDate: Date())
     }
 
     private var panelDetail: PluginPanelDetail? {
@@ -118,44 +131,29 @@ final class KeepAwakePlugin: FeaturePlugin {
             return nil
         }
 
-        let now = Date()
-        var controls = [
-            PluginPanelControl(
-                id: ControlID.duration,
-                kind: .segmented,
-                options: [
-                    PluginPanelControlOption(id: DurationOptionID.forever, title: "永不", subtitle: nil),
-                    PluginPanelControlOption(id: DurationOptionID.thirtyMinutes, title: "30min", subtitle: nil),
-                    PluginPanelControlOption(id: DurationOptionID.custom, title: "自定义", subtitle: nil)
-                ],
-                selectedOptionID: selectedDurationPreset.rawValue,
-                dateValue: nil,
-                minimumDate: nil,
-                displayedComponents: nil,
-                datePickerStyle: nil,
-                sectionTitle: nil,
-                isEnabled: true
-            )
-        ]
-
-        if selectedDurationPreset == .custom {
-            controls.append(
+        return PluginPanelDetail(
+            primaryControls: [
                 PluginPanelControl(
-                    id: ControlID.customEndDate,
-                    kind: .datePicker,
-                    options: [],
-                    selectedOptionID: nil,
-                    dateValue: resolvedCustomEndDate(referenceDate: now),
-                    minimumDate: minimumCustomEndDate(referenceDate: now),
-                    displayedComponents: [.date, .hourAndMinute],
-                    datePickerStyle: .dateTimeCard,
+                    id: ControlID.duration,
+                    kind: .segmented,
+                    options: [
+                        PluginPanelControlOption(id: DurationOptionID.forever, title: "永不"),
+                        PluginPanelControlOption(id: DurationOptionID.thirtyMinutes, title: "30min"),
+                        PluginPanelControlOption(id: DurationOptionID.oneHour, title: "1h"),
+                        PluginPanelControlOption(id: DurationOptionID.twoHours, title: "2h"),
+                        PluginPanelControlOption(id: DurationOptionID.fiveHours, title: "5h")
+                    ],
+                    selectedOptionID: selectedDurationPreset.rawValue,
+                    dateValue: nil,
+                    minimumDate: nil,
+                    displayedComponents: nil,
+                    datePickerStyle: nil,
                     sectionTitle: nil,
                     isEnabled: true
                 )
-            )
-        }
-
-        return PluginPanelDetail(primaryControls: controls, secondaryPanel: nil)
+            ],
+            secondaryPanel: nil
+        )
     }
 
     private func setKeepAwakeEnabled(_ isEnabled: Bool) {
@@ -172,7 +170,6 @@ final class KeepAwakePlugin: FeaturePlugin {
         }
 
         selectedDurationPreset = .forever
-        customEndDate = nil
         applyKeepAwakeConfiguration()
     }
 
@@ -182,23 +179,6 @@ final class KeepAwakePlugin: FeaturePlugin {
         }
 
         selectedDurationPreset = preset
-        lastErrorMessage = nil
-
-        if preset == .custom {
-            customEndDate = resolvedCustomEndDate(referenceDate: Date())
-        }
-
-        guard session != nil else {
-            notifyChange()
-            return
-        }
-
-        applyKeepAwakeConfiguration()
-    }
-
-    private func updateCustomEndDate(_ date: Date) {
-        customEndDate = sanitizedCustomEndDate(date, referenceDate: Date())
-        selectedDurationPreset = .custom
         lastErrorMessage = nil
 
         guard session != nil else {
@@ -213,10 +193,13 @@ final class KeepAwakePlugin: FeaturePlugin {
         let session = session ?? KeepAwakeSession { [weak self] reason in
             self?.handleSessionEnd(reason)
         }
+        let endDate = resolvedScheduledEndDate(referenceDate: Date())
 
         do {
-            try session.start(until: scheduledEndDate(referenceDate: Date()))
+            try session.start(until: endDate)
             self.session = session
+            scheduledEndDate = endDate
+            scheduleSubtitleRefreshIfNeeded()
             lastErrorMessage = nil
             notifyChange()
         } catch {
@@ -226,49 +209,76 @@ final class KeepAwakePlugin: FeaturePlugin {
         }
     }
 
-    private func scheduledEndDate(referenceDate: Date) -> Date? {
-        switch selectedDurationPreset {
-        case .forever:
-            return nil
-        case .thirtyMinutes:
-            return referenceDate.addingTimeInterval(30 * 60)
-        case .custom:
-            return resolvedCustomEndDate(referenceDate: referenceDate)
-        }
+    private func resolvedScheduledEndDate(referenceDate: Date) -> Date? {
+        selectedDurationPreset.timeInterval.map(referenceDate.addingTimeInterval)
     }
 
-    private func resolvedCustomEndDate(referenceDate: Date) -> Date {
-        if let customEndDate {
-            return sanitizedCustomEndDate(customEndDate, referenceDate: referenceDate)
-        }
-
-        return defaultCustomEndDate(referenceDate: referenceDate)
-    }
-
-    private func defaultCustomEndDate(referenceDate: Date) -> Date {
-        referenceDate.addingTimeInterval(Timing.defaultCustomLeadTime)
-    }
-
-    private func sanitizedCustomEndDate(
-        _ date: Date,
+    private func remainingTimeDescription(
+        until endDate: Date,
         referenceDate: Date
-    ) -> Date {
-        let minimumDate = minimumCustomEndDate(referenceDate: referenceDate)
-        return max(date, minimumDate)
-    }
+    ) -> String {
+        let remainingDuration = max(endDate.timeIntervalSince(referenceDate), 0)
+        let remainingMinutes = max(
+            Int(ceil(remainingDuration / Timing.secondsPerMinute)),
+            1
+        )
 
-    private func minimumCustomEndDate(referenceDate: Date) -> Date {
-        referenceDate.addingTimeInterval(Timing.minimumCustomLeadTime)
-    }
+        let hours = remainingMinutes / 60
+        let minutes = remainingMinutes % 60
 
-    private func formattedEndDate(referenceDate: Date) -> String {
-        let endDate = resolvedCustomEndDate(referenceDate: referenceDate)
-
-        if Calendar.current.isDateInToday(endDate) {
-            return endDate.formatted(date: .omitted, time: .shortened)
+        if hours == 0 {
+            return "\(remainingMinutes) 分钟后自动停止"
         }
 
-        return endDate.formatted(.dateTime.month().day().hour().minute())
+        if minutes == 0 {
+            return "\(hours) 小时后自动停止"
+        }
+
+        return "\(hours) 小时 \(minutes) 分钟后自动停止"
+    }
+
+    private func scheduleSubtitleRefreshIfNeeded() {
+        invalidateSubtitleRefreshTimer()
+
+        guard session != nil, let scheduledEndDate else {
+            return
+        }
+
+        let remainingDuration = scheduledEndDate.timeIntervalSinceNow
+
+        guard remainingDuration > 0 else {
+            return
+        }
+
+        let remainder = remainingDuration.truncatingRemainder(dividingBy: Timing.secondsPerMinute)
+        let nextRefreshInterval = remainder > 0 ? remainder : Timing.secondsPerMinute
+
+        let timer = Timer(
+            timeInterval: nextRefreshInterval,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSubtitleRefreshTimerFired()
+            }
+        }
+        timer.tolerance = min(1, nextRefreshInterval * 0.1)
+        RunLoop.main.add(timer, forMode: .common)
+        subtitleRefreshTimer = timer
+    }
+
+    private func handleSubtitleRefreshTimerFired() {
+        guard session != nil, scheduledEndDate != nil else {
+            invalidateSubtitleRefreshTimer()
+            return
+        }
+
+        notifyChange()
+        scheduleSubtitleRefreshIfNeeded()
+    }
+
+    private func invalidateSubtitleRefreshTimer() {
+        subtitleRefreshTimer?.invalidate()
+        subtitleRefreshTimer = nil
     }
 
     private func handleSessionEnd(_ reason: KeepAwakeSession.EndReason) {
@@ -285,7 +295,8 @@ final class KeepAwakePlugin: FeaturePlugin {
 
     private func resetSelectionToDefaults() {
         selectedDurationPreset = .forever
-        customEndDate = nil
+        scheduledEndDate = nil
+        invalidateSubtitleRefreshTimer()
     }
 
     private func notifyChange() {
