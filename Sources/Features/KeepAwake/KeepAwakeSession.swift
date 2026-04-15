@@ -47,7 +47,7 @@ final class KeepAwakeSession {
             NotificationCenter.default.removeObserver(
                 self,
                 name: NSApplication.willTerminateNotification,
-                object: NSApp
+                object: nil
             )
         }
     }
@@ -74,7 +74,7 @@ final class KeepAwakeSession {
             self,
             selector: #selector(handleAppWillTerminate),
             name: NSApplication.willTerminateNotification,
-            object: NSApp
+            object: nil
         )
         isObservingTermination = true
     }
@@ -156,7 +156,7 @@ final class KeepAwakeSession {
         NotificationCenter.default.removeObserver(
             self,
             name: NSApplication.willTerminateNotification,
-            object: NSApp
+            object: nil
         )
         isObservingTermination = false
     }

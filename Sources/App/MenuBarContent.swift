@@ -51,10 +51,10 @@ struct MenuBarContent: View {
             }
         )
         .animation(.easeOut(duration: 0.18), value: attachedSecondaryPanelItemID)
-        .onChange(of: attachedSecondaryPanelItemID) { _ in
+        .onChange(of: attachedSecondaryPanelItemID) {
             syncSecondaryPanelWindow()
         }
-        .onChange(of: selectedNavigationRowFrame) { _ in
+        .onChange(of: selectedNavigationRowFrame) {
             syncSecondaryPanelWindow()
         }
         .onReceive(pluginHost.$settingsPresentationRequestCount.dropFirst()) { _ in
