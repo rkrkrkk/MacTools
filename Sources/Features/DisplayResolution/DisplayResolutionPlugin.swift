@@ -114,6 +114,10 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             title += " (原生)"
         } else if mode.isDefault {
             title += " (默认)"
+        } else if mode.isHiDPI {
+            title += " (HiDPI)"
+        } else {
+            title += " (LoDPI)"
         }
         return title
     }

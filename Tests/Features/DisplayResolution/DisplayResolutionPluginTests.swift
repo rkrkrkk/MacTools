@@ -28,10 +28,42 @@ final class DisplayResolutionPluginTests: XCTestCase {
         )
     }
 
-    func testOptionTitleLeavesScaledModeUndecorated() {
+    func testOptionTitleMarksScaledHiDPIMode() {
         XCTAssertEqual(
             DisplayResolutionPlugin.optionTitle(for: makeMode(modeId: 3, width: 3008, height: 1692)),
-            "3008×1692"
+            "3008×1692 (HiDPI)"
+        )
+    }
+
+    func testOptionTitleMarksHiDPIMode() {
+        XCTAssertEqual(
+            DisplayResolutionPlugin.optionTitle(
+                for: makeMode(
+                    modeId: 4,
+                    width: 3200,
+                    height: 1800,
+                    pixelWidth: 6400,
+                    pixelHeight: 3600,
+                    isHiDPI: true
+                )
+            ),
+            "3200×1800 (HiDPI)"
+        )
+    }
+
+    func testOptionTitleMarksLoDPIMode() {
+        XCTAssertEqual(
+            DisplayResolutionPlugin.optionTitle(
+                for: makeMode(
+                    modeId: 5,
+                    width: 4096,
+                    height: 2304,
+                    pixelWidth: 4096,
+                    pixelHeight: 2304,
+                    isHiDPI: false
+                )
+            ),
+            "4096×2304 (LoDPI)"
         )
     }
 
@@ -91,6 +123,20 @@ final class DisplayResolutionPluginTests: XCTestCase {
         ]
 
         XCTAssertEqual(DisplayResolutionController.deduplicateModes(modes).map(\.modeId), [71])
+    }
+
+    func testSortModesOrdersByLogicalResolutionDescending() {
+        let modes = [
+            makeMode(modeId: 80, width: 3200, height: 1800, pixelWidth: 6400, pixelHeight: 3600),
+            makeMode(modeId: 81, width: 5120, height: 2880, pixelWidth: 5120, pixelHeight: 2880, isHiDPI: false, isNative: true),
+            makeMode(modeId: 82, width: 4096, height: 2304, pixelWidth: 4096, pixelHeight: 2304, isHiDPI: false),
+            makeMode(modeId: 83, width: 2560, height: 1440, pixelWidth: 5120, pixelHeight: 2880, isNative: true)
+        ]
+
+        XCTAssertEqual(
+            DisplayResolutionController.sortModes(modes).map(\.modeId),
+            [81, 82, 80, 83]
+        )
     }
 
     func testDisplayResolutionInfoEquatableByModeId() {

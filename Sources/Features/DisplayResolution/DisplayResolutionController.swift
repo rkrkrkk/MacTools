@@ -59,10 +59,7 @@ final class DisplayResolutionController {
                 isCurrent: mode.ioDisplayModeID == currentID
             )
         }
-        return Self.deduplicateModes(infos)
-        .sorted {
-            $0.pixelWidth != $1.pixelWidth ? $0.pixelWidth > $1.pixelWidth : $0.width > $1.width
-        }
+        return Self.sortModes(Self.deduplicateModes(infos))
     }
 
     nonisolated static func deduplicateModes(_ modes: [DisplayResolutionInfo]) -> [DisplayResolutionInfo] {
@@ -79,6 +76,28 @@ final class DisplayResolutionController {
         }
 
         return Array(bestByKey.values)
+    }
+
+    nonisolated static func sortModes(_ modes: [DisplayResolutionInfo]) -> [DisplayResolutionInfo] {
+        modes.sorted {
+            if $0.width != $1.width {
+                return $0.width > $1.width
+            }
+
+            if $0.height != $1.height {
+                return $0.height > $1.height
+            }
+
+            if $0.isCurrent != $1.isCurrent {
+                return $0.isCurrent
+            }
+
+            if $0.isHiDPI != $1.isHiDPI {
+                return $0.isHiDPI
+            }
+
+            return $0.refreshRate > $1.refreshRate
+        }
     }
 
     @discardableResult
