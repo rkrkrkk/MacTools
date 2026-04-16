@@ -146,7 +146,7 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             case .failure(let error):
                 handleApplyFailure(error, displayID: displayID, modeId: modeId)
             }
-        case .setSwitch, .setDate:
+        case .setSwitch, .setDate, .setSlider:
             return
         }
     }

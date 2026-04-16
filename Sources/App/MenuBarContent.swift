@@ -20,7 +20,8 @@ enum MenuBarPanelLayout {
 private enum FeatureRowLayout {
     static let iconSize: CGFloat = 28
     static let rowSpacing: CGFloat = 10
-    static let detailLeadingInset: CGFloat = iconSize + rowSpacing
+    static let detailControlHorizontalPadding: CGFloat = 10
+    static let detailLeadingInset: CGFloat = iconSize + rowSpacing - detailControlHorizontalPadding
 }
 
 private enum MenuBarHoverStyle {
@@ -34,7 +35,7 @@ private enum MenuBarHoverStyle {
 
 @MainActor
 final class HoverSecondaryPanelCoordinator: ObservableObject {
-    struct Activation: Equatable {
+    struct Activation: Equatable, Hashable {
         let pluginID: String
         let controlID: String
         let optionID: String
@@ -48,6 +49,7 @@ final class HoverSecondaryPanelCoordinator: ObservableObject {
     private let dismissDelay: Duration
     private var dismissTask: Task<Void, Never>?
     private var isPanelHovered = false
+    private var rowFrames: [Activation: CGRect] = [:]
 
     init(dismissDelay: Duration = .milliseconds(160)) {
         self.dismissDelay = dismissDelay
@@ -67,11 +69,8 @@ final class HoverSecondaryPanelCoordinator: ObservableObject {
         cancelDismissal()
         isPanelHovered = false
 
-        if activeActivation != activation {
-            selectedRowFrame = nil
-        }
-
         activeActivation = activation
+        selectedRowFrame = rowFrames[activation]
     }
 
     func hoverEnded(
@@ -98,7 +97,17 @@ final class HoverSecondaryPanelCoordinator: ObservableObject {
         }
     }
 
-    func setSelectedRowFrame(_ frame: CGRect?) {
+    func updateRowFrame(_ frame: CGRect?, for activation: Activation) {
+        if let frame {
+            rowFrames[activation] = frame
+        } else {
+            rowFrames.removeValue(forKey: activation)
+        }
+
+        guard activeActivation == activation else {
+            return
+        }
+
         selectedRowFrame = frame
     }
 
@@ -277,7 +286,15 @@ struct MenuBarContent: View {
             onDateChange: { controlID, date in
                 pluginHost.setPanelDateValue(date, controlID: controlID, for: panelItem.id)
             },
-            onHoverChange: handleSecondaryPanelHoverChange
+            onHoverChange: handleSecondaryPanelHoverChange,
+            onSliderChange: { controlID, value, phase in
+                pluginHost.setPanelSliderValue(
+                    value,
+                    controlID: controlID,
+                    for: panelItem.id,
+                    phase: phase
+                )
+            }
         )
     }
 
@@ -292,11 +309,6 @@ struct MenuBarContent: View {
                 pluginID: pluginID,
                 controlID: controlID,
                 optionID: optionID
-            )
-            pluginHost.setPanelNavigationSelectionValue(
-                optionID,
-                controlID: controlID,
-                for: pluginID
             )
             return
         }
@@ -330,7 +342,6 @@ struct MenuBarContent: View {
             ForEach(pluginHost.panelItems) { item in
                 FeatureRowView(
                     item: item,
-                    tracksSelectedNavigationRow: hoverCoordinator.activeActivation?.pluginID == item.id,
                     isOn: Binding(
                         get: { pluginHost.isSwitchOn(for: item.id) },
                         set: { newValue in
@@ -354,13 +365,26 @@ struct MenuBarContent: View {
                             isHovering: isHovering
                         )
                     },
-                    onSelectedNavigationRowFrameChange: { frame in
-                        if hoverCoordinator.activeActivation?.pluginID == item.id {
-                            hoverCoordinator.setSelectedRowFrame(frame)
-                        }
+                    onNavigationRowFrameChange: { controlID, optionID, frame in
+                        hoverCoordinator.updateRowFrame(
+                            frame,
+                            for: HoverSecondaryPanelCoordinator.Activation(
+                                pluginID: item.id,
+                                controlID: controlID,
+                                optionID: optionID
+                            )
+                        )
                     },
                     onDateChange: { controlID, date in
                         pluginHost.setPanelDateValue(date, controlID: controlID, for: item.id)
+                    },
+                    onSliderChange: { controlID, value, phase in
+                        pluginHost.setPanelSliderValue(
+                            value,
+                            controlID: controlID,
+                            for: item.id,
+                            phase: phase
+                        )
                     }
                 )
             }
@@ -390,15 +414,15 @@ struct MenuBarContent: View {
 
 struct FeatureRowView: View {
     let item: PluginPanelItem
-    let tracksSelectedNavigationRow: Bool
     @Binding var isOn: Bool
     let onDisclosureToggle: (Bool) -> Void
     let onSelectionChange: (String, String) -> Void
     let onNavigationSelectionChange: (String, String) -> Void
     let onNavigationHoverChange: (String, String, Bool) -> Void
-    let onSelectedNavigationRowFrameChange: (CGRect?) -> Void
+    let onNavigationRowFrameChange: (String, String, CGRect?) -> Void
     let onDateChange: (String, Date) -> Void
     @State private var isHovered = false
+    let onSliderChange: (String, Double, PluginPanelAction.SliderPhase) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: detailToDisplay == nil ? 0 : 12) {
@@ -424,8 +448,9 @@ struct FeatureRowView: View {
                     onSelectionChange: onSelectionChange,
                     onNavigationSelectionChange: onNavigationSelectionChange,
                     onNavigationHoverChange: onNavigationHoverChange,
-                    onSelectedNavigationRowFrameChange: tracksSelectedNavigationRow ? onSelectedNavigationRowFrameChange : { _ in },
-                    onDateChange: onDateChange
+                    onNavigationRowFrameChange: onNavigationRowFrameChange,
+                    onDateChange: onDateChange,
+                    onSliderChange: onSliderChange
                 )
                 .padding(.leading, FeatureRowLayout.detailLeadingInset)
             }
@@ -506,8 +531,9 @@ private struct PluginPanelDetailView: View {
     let onSelectionChange: (String, String) -> Void
     let onNavigationSelectionChange: (String, String) -> Void
     let onNavigationHoverChange: (String, String, Bool) -> Void
-    let onSelectedNavigationRowFrameChange: (CGRect?) -> Void
+    let onNavigationRowFrameChange: (String, String, CGRect?) -> Void
     let onDateChange: (String, Date) -> Void
+    let onSliderChange: (String, Double, PluginPanelAction.SliderPhase) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -584,7 +610,16 @@ private struct PluginPanelDetailView: View {
                 onHoverChange: { optionID, isHovering in
                     onNavigationHoverChange(control.id, optionID, isHovering)
                 },
-                onSelectedRowFrameChange: onSelectedNavigationRowFrameChange
+                onRowFrameChange: { optionID, frame in
+                    onNavigationRowFrameChange(control.id, optionID, frame)
+                }
+            )
+        case .slider:
+            SliderControl(
+                control: control,
+                onChange: { value, phase in
+                    onSliderChange(control.id, value, phase)
+                }
             )
         }
     }
@@ -670,7 +705,7 @@ private struct NavigationListControl: View {
     let control: PluginPanelControl
     let onSelect: (String) -> Void
     let onHoverChange: (String, Bool) -> Void
-    let onSelectedRowFrameChange: (CGRect?) -> Void
+    let onRowFrameChange: (String, CGRect?) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -684,7 +719,9 @@ private struct NavigationListControl: View {
                     onHoverChange: { isHovering in
                         onHoverChange(option.id, isHovering)
                     },
-                    onSelectedRowFrameChange: onSelectedRowFrameChange
+                    onRowFrameChange: { frame in
+                        onRowFrameChange(option.id, frame)
+                    }
                 )
             }
         }
@@ -698,7 +735,7 @@ private struct NavigationListRow: View {
     let isEnabled: Bool
     let action: () -> Void
     let onHoverChange: (Bool) -> Void
-    let onSelectedRowFrameChange: (CGRect?) -> Void
+    let onRowFrameChange: (CGRect?) -> Void
 
     @State private var isHovered = false
 
@@ -730,7 +767,7 @@ private struct NavigationListRow: View {
                     .foregroundStyle(.secondary)
                     .opacity(isSelected ? 1 : (isHovered ? 0.55 : 0.35))
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, FeatureRowLayout.detailControlHorizontalPadding)
             .padding(.vertical, 9)
             .frame(minHeight: MenuBarPanelLayout.navigationRowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -745,10 +782,12 @@ private struct NavigationListRow: View {
         .disabled(!isEnabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            SelectedRowFrameReader(
-                isActive: isSelected,
-                onFrameChange: onSelectedRowFrameChange
+            NavigationRowFrameReader(
+                onFrameChange: onRowFrameChange
             )
+        }
+        .onDisappear {
+            onRowFrameChange(nil)
         }
         .onHover { hovering in
             isHovered = hovering
@@ -779,6 +818,112 @@ private struct NavigationListRow: View {
     }
 }
 
+private struct SliderControl: View {
+    let control: PluginPanelControl
+    let onChange: (Double, PluginPanelAction.SliderPhase) -> Void
+
+    @State private var localValue = 0.0
+    @State private var isEditing = false
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if control.sectionTitle != nil || control.valueLabel != nil {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let title = control.sectionTitle, !title.isEmpty {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if let valueLabel = control.valueLabel {
+                        Text(valueLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                brightnessGlyph(systemName: "sun.min.fill", size: 13)
+
+                Slider(
+                    value: Binding(
+                        get: { isEditing ? localValue : (control.sliderValue ?? localValue) },
+                        set: { newValue in
+                            let snappedValue = snappedSliderValue(for: newValue)
+                            localValue = snappedValue
+                            onChange(snappedValue, .changed)
+                        }
+                    ),
+                    in: control.sliderBounds ?? 0...1,
+                    onEditingChanged: { isEditing in
+                        self.isEditing = isEditing
+
+                        if isEditing {
+                            localValue = control.sliderValue ?? localValue
+                        } else {
+                            onChange(localValue, .ended)
+                        }
+                    }
+                )
+                .labelsHidden()
+                .disabled(!control.isEnabled)
+                .tint(Color(nsColor: .controlAccentColor))
+                .accessibilityLabel(control.sectionTitle ?? "显示器亮度")
+
+                brightnessGlyph(systemName: "sun.max.fill", size: 13)
+            }
+        }
+        .padding(.horizontal, FeatureRowLayout.detailControlHorizontalPadding)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .center) {
+            RoundedRectangle(cornerRadius: MenuBarHoverStyle.navigationCornerRadius, style: .continuous)
+                .inset(by: MenuBarHoverStyle.inset)
+                .fill(control.isEnabled && isHovered ? MenuBarHoverStyle.fill : Color.clear)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: MenuBarHoverStyle.navigationCornerRadius, style: .continuous))
+        .onHover { isHovered = $0 }
+        .onAppear {
+            localValue = control.sliderValue ?? 0
+        }
+        .onChange(of: control.sliderValue) { _, newValue in
+            guard !isEditing else {
+                return
+            }
+
+            localValue = newValue ?? localValue
+        }
+    }
+
+    private func brightnessGlyph(systemName: String, size: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(width: size + 6, alignment: .center)
+            .accessibilityHidden(true)
+    }
+
+    private func snappedSliderValue(for value: Double) -> Double {
+        let bounds = control.sliderBounds ?? 0...1
+        let clampedValue = min(max(value, bounds.lowerBound), bounds.upperBound)
+
+        guard
+            let step = control.sliderStep,
+            step > 0
+        else {
+            return clampedValue
+        }
+
+        let snappedValue = (clampedValue / step).rounded() * step
+        return min(max(snappedValue, bounds.lowerBound), bounds.upperBound)
+    }
+}
+
 private struct SecondarySlidingPanel: View {
     private static let cornerRadius: CGFloat = 14
 
@@ -788,6 +933,7 @@ private struct SecondarySlidingPanel: View {
     let onNavigationSelectionChange: (String, String) -> Void
     let onDateChange: (String, Date) -> Void
     let onHoverChange: (Bool) -> Void
+    let onSliderChange: (String, Double, PluginPanelAction.SliderPhase) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -801,8 +947,9 @@ private struct SecondarySlidingPanel: View {
                 onSelectionChange: onSelectionChange,
                 onNavigationSelectionChange: onNavigationSelectionChange,
                 onNavigationHoverChange: { _, _, _ in },
-                onSelectedNavigationRowFrameChange: { _ in },
-                onDateChange: onDateChange
+                onNavigationRowFrameChange: { _, _, _ in },
+                onDateChange: onDateChange,
+                onSliderChange: onSliderChange
             )
         }
         .padding(12)
@@ -896,7 +1043,8 @@ private final class SecondaryPanelController: ObservableObject {
         onSelectionChange: @escaping (String, String) -> Void,
         onNavigationSelectionChange: @escaping (String, String) -> Void,
         onDateChange: @escaping (String, Date) -> Void,
-        onHoverChange: @escaping (Bool) -> Void
+        onHoverChange: @escaping (Bool) -> Void,
+        onSliderChange: @escaping (String, Double, PluginPanelAction.SliderPhase) -> Void
     ) {
         guard let hostWindow else { return }
         // MenuWindowAccessor.updateNSView 会在 .onDisappear 之后仍派发 async 回调，
@@ -910,7 +1058,8 @@ private final class SecondaryPanelController: ObservableObject {
             onSelectionChange: onSelectionChange,
             onNavigationSelectionChange: onNavigationSelectionChange,
             onDateChange: onDateChange,
-            onHoverChange: onHoverChange
+            onHoverChange: onHoverChange,
+            onSliderChange: onSliderChange
         )
         .frame(width: MenuBarPanelLayout.secondaryPanelWidth)
 
@@ -1017,8 +1166,7 @@ private struct MenuWindowAccessor: NSViewRepresentable {
     }
 }
 
-private struct SelectedRowFrameReader: NSViewRepresentable {
-    let isActive: Bool
+private struct NavigationRowFrameReader: NSViewRepresentable {
     let onFrameChange: (CGRect?) -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -1036,11 +1184,6 @@ private struct SelectedRowFrameReader: NSViewRepresentable {
     }
 
     private func updateFrame(for view: NSView) {
-        guard isActive else {
-            onFrameChange(nil)
-            return
-        }
-
         guard let window = view.window else {
             onFrameChange(nil)
             return

@@ -118,7 +118,12 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
                 logger.debug("panel action setSwitch isEnabled=\(isEnabled, privacy: .public)")
             }
             setPhysicalCleanModeEnabled(isEnabled)
-        case .setDisclosureExpanded, .setSelection, .setNavigationSelection, .clearNavigationSelection, .setDate:
+        case .setDisclosureExpanded,
+             .setSelection,
+             .setNavigationSelection,
+             .clearNavigationSelection,
+             .setDate,
+             .setSlider:
             break
         }
     }

@@ -7,8 +7,8 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testNavigationOmitsDisplaysWithoutVisibleModes() throws {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
-            DisplayInfo(id: 4, name: "Projector", isBuiltin: false, isMain: false)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true),
+            makeDisplay(id: 4, name: "Projector")
         ]
         controller.modesByDisplayID = [
             2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)],
@@ -55,8 +55,8 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testSelectingResolutionInSecondaryPanelAppliesModeOnSelectedDisplay() throws {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
-            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true),
+            makeDisplay(id: 3, name: "LG UltraFine")
         ]
         controller.modesByDisplayID = [
             2: [
@@ -94,8 +94,8 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testMissingSelectedDisplayClearsSecondaryPanel() {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
-            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true),
+            makeDisplay(id: 3, name: "LG UltraFine")
         ]
         controller.modesByDisplayID = [
             2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)],
@@ -107,7 +107,7 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
         plugin.handlePanelAction(.setNavigationSelection(controlID: "display-navigation", optionID: "2"))
 
         controller.displays = [
-            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+            makeDisplay(id: 3, name: "LG UltraFine")
         ]
 
         XCTAssertNil(plugin.panelState.detail?.secondaryPanel)
@@ -118,7 +118,7 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testAllFilteredDisplaysDisablePluginAndSuppressDetail() {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true)
         ]
         controller.modesByDisplayID = [2: []]
 
@@ -136,8 +136,8 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     func testSelectingDifferentDisplayClearsLastErrorMessage() throws {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
-            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true),
+            makeDisplay(id: 3, name: "LG UltraFine")
         ]
         controller.modesByDisplayID = [
             2: [
@@ -165,8 +165,8 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
     private func makePlugin() -> DisplayResolutionPlugin {
         let controller = MockDisplayResolutionController()
         controller.displays = [
-            DisplayInfo(id: 2, name: "Studio Display", isBuiltin: false, isMain: true),
-            DisplayInfo(id: 3, name: "LG UltraFine", isBuiltin: false, isMain: false)
+            makeDisplay(id: 2, name: "Studio Display", isMain: true),
+            makeDisplay(id: 3, name: "LG UltraFine")
         ]
         controller.modesByDisplayID = [
             2: [
@@ -197,6 +197,22 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
             isNative: false,
             isDefault: false,
             isCurrent: isCurrent
+        )
+    }
+
+    private func makeDisplay(
+        id: CGDirectDisplayID,
+        name: String,
+        isMain: Bool = false
+    ) -> DisplayInfo {
+        DisplayInfo(
+            id: id,
+            name: name,
+            isBuiltin: false,
+            isMain: isMain,
+            vendorNumber: nil,
+            modelNumber: nil,
+            serialNumber: nil
         )
     }
 }

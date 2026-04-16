@@ -41,6 +41,42 @@ final class MenuBarPanelLayoutTests: XCTestCase {
         XCTAssertEqual(MenuBarPanelLayout.width(for: [item]), MenuBarPanelLayout.baseWidth)
     }
 
+    func testWidthUsesBaseWidthForExpandedSliderOnlyDisclosureDetail() {
+        let sliderControl = PluginPanelControl(
+            id: "display.2.brightness",
+            kind: .slider,
+            options: [],
+            selectedOptionID: nil,
+            dateValue: nil,
+            minimumDate: nil,
+            displayedComponents: nil,
+            datePickerStyle: nil,
+            sectionTitle: "Studio Display",
+            sliderValue: 0.72,
+            sliderBounds: 0...1,
+            sliderStep: 0.01,
+            valueLabel: "72%",
+            isEnabled: true
+        )
+        let item = PluginPanelItem(
+            id: "display-brightness",
+            title: "显示器亮度",
+            iconName: "sun.max",
+            iconTint: Color(nsColor: .systemYellow),
+            controlStyle: .disclosure,
+            menuActionBehavior: .keepPresented,
+            description: "快速调节每个显示器的亮度",
+            helpText: "快速调节每个显示器的亮度",
+            descriptionTone: .secondary,
+            isOn: false,
+            isExpanded: true,
+            isEnabled: true,
+            detail: PluginPanelDetail(primaryControls: [sliderControl], secondaryPanel: nil)
+        )
+
+        XCTAssertEqual(MenuBarPanelLayout.width(for: [item]), MenuBarPanelLayout.baseWidth)
+    }
+
     private func makeItem(
         controlStyle: PluginControlStyle,
         isExpanded: Bool,
@@ -68,82 +104,75 @@ final class MenuBarPanelLayoutTests: XCTestCase {
 final class HoverSecondaryPanelCoordinatorTests: XCTestCase {
     func testSwitchingActivationClearsPreviousAnchor() {
         let coordinator = HoverSecondaryPanelCoordinator(dismissDelay: .milliseconds(5))
+        let firstActivation = makeActivation(optionID: "2")
+        let secondActivation = makeActivation(optionID: "3")
 
         coordinator.hoverBegan(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "2"
+            pluginID: firstActivation.pluginID,
+            controlID: firstActivation.controlID,
+            optionID: firstActivation.optionID
         )
-        coordinator.setSelectedRowFrame(CGRect(x: 10, y: 20, width: 30, height: 40))
+        coordinator.updateRowFrame(
+            CGRect(x: 10, y: 20, width: 30, height: 40),
+            for: firstActivation
+        )
 
         coordinator.hoverBegan(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "3"
+            pluginID: secondActivation.pluginID,
+            controlID: secondActivation.controlID,
+            optionID: secondActivation.optionID
         )
 
-        XCTAssertEqual(
-            coordinator.activeActivation,
-            HoverSecondaryPanelCoordinator.Activation(
-                pluginID: "display-resolution",
-                controlID: "display-navigation",
-                optionID: "3"
-            )
-        )
+        XCTAssertEqual(coordinator.activeActivation, secondActivation)
         XCTAssertNil(coordinator.selectedRowFrame)
     }
 
     func testHoverEndDismissesAfterDelayAndNotifies() async throws {
         let coordinator = HoverSecondaryPanelCoordinator(dismissDelay: .milliseconds(10))
         var dismissedActivation: HoverSecondaryPanelCoordinator.Activation?
+        let activation = makeActivation(optionID: "2")
 
         coordinator.onDismissRequest = { activation in
             dismissedActivation = activation
         }
 
         coordinator.hoverBegan(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "2"
+            pluginID: activation.pluginID,
+            controlID: activation.controlID,
+            optionID: activation.optionID
         )
-        coordinator.setSelectedRowFrame(CGRect(x: 1, y: 2, width: 3, height: 4))
+        coordinator.updateRowFrame(CGRect(x: 1, y: 2, width: 3, height: 4), for: activation)
         coordinator.hoverEnded(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "2"
+            pluginID: activation.pluginID,
+            controlID: activation.controlID,
+            optionID: activation.optionID
         )
 
         try await Task.sleep(for: .milliseconds(50))
 
         XCTAssertNil(coordinator.activeActivation)
         XCTAssertNil(coordinator.selectedRowFrame)
-        XCTAssertEqual(
-            dismissedActivation,
-            HoverSecondaryPanelCoordinator.Activation(
-                pluginID: "display-resolution",
-                controlID: "display-navigation",
-                optionID: "2"
-            )
-        )
+        XCTAssertEqual(dismissedActivation, activation)
     }
 
     func testPanelHoverCancelsPendingDismissal() async throws {
         let coordinator = HoverSecondaryPanelCoordinator(dismissDelay: .milliseconds(20))
         var dismissCount = 0
+        let activation = makeActivation(optionID: "2")
 
         coordinator.onDismissRequest = { _ in
             dismissCount += 1
         }
 
         coordinator.hoverBegan(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "2"
+            pluginID: activation.pluginID,
+            controlID: activation.controlID,
+            optionID: activation.optionID
         )
         coordinator.hoverEnded(
-            pluginID: "display-resolution",
-            controlID: "display-navigation",
-            optionID: "2"
+            pluginID: activation.pluginID,
+            controlID: activation.controlID,
+            optionID: activation.optionID
         )
         coordinator.setPanelHovered(true)
 
@@ -157,5 +186,57 @@ final class HoverSecondaryPanelCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.activeActivation)
         XCTAssertEqual(dismissCount, 1)
+    }
+
+    func testHoverBeganUsesCachedFrameForNewActivation() {
+        let coordinator = HoverSecondaryPanelCoordinator(dismissDelay: .milliseconds(5))
+        let activation = makeActivation(optionID: "3")
+        let frame = CGRect(x: 30, y: 40, width: 120, height: 48)
+
+        coordinator.updateRowFrame(frame, for: activation)
+        coordinator.hoverBegan(
+            pluginID: activation.pluginID,
+            controlID: activation.controlID,
+            optionID: activation.optionID
+        )
+
+        XCTAssertEqual(coordinator.activeActivation, activation)
+        XCTAssertEqual(coordinator.selectedRowFrame, frame)
+    }
+
+    func testInactiveRowFrameClearDoesNotOverrideCurrentAnchor() {
+        let coordinator = HoverSecondaryPanelCoordinator(dismissDelay: .milliseconds(5))
+        let firstActivation = makeActivation(optionID: "2")
+        let secondActivation = makeActivation(optionID: "3")
+        let secondFrame = CGRect(x: 80, y: 60, width: 160, height: 48)
+
+        coordinator.hoverBegan(
+            pluginID: firstActivation.pluginID,
+            controlID: firstActivation.controlID,
+            optionID: firstActivation.optionID
+        )
+        coordinator.updateRowFrame(
+            CGRect(x: 10, y: 20, width: 140, height: 48),
+            for: firstActivation
+        )
+
+        coordinator.hoverBegan(
+            pluginID: secondActivation.pluginID,
+            controlID: secondActivation.controlID,
+            optionID: secondActivation.optionID
+        )
+        coordinator.updateRowFrame(secondFrame, for: secondActivation)
+        coordinator.updateRowFrame(nil, for: firstActivation)
+
+        XCTAssertEqual(coordinator.activeActivation, secondActivation)
+        XCTAssertEqual(coordinator.selectedRowFrame, secondFrame)
+    }
+
+    private func makeActivation(optionID: String) -> HoverSecondaryPanelCoordinator.Activation {
+        HoverSecondaryPanelCoordinator.Activation(
+            pluginID: "display-resolution",
+            controlID: "display-navigation",
+            optionID: optionID
+        )
     }
 }

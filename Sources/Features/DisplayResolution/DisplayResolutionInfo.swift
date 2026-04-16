@@ -1,13 +1,6 @@
 import CoreGraphics
 import Foundation
 
-struct DisplayInfo: Identifiable, Equatable {
-    let id: CGDirectDisplayID
-    let name: String
-    let isBuiltin: Bool
-    let isMain: Bool
-}
-
 struct DisplayResolutionInfo: Equatable {
     let modeId: Int32
     let width: Int

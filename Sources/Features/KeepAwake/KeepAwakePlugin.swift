@@ -99,7 +99,7 @@ final class KeepAwakePlugin: FeaturePlugin {
             }
 
             updateDurationPreset(using: optionID)
-        case .setDate:
+        case .setDate, .setSlider:
             return
         }
     }

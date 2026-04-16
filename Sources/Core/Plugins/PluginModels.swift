@@ -7,12 +7,18 @@ enum PluginControlStyle {
 }
 
 enum PluginPanelAction: Equatable {
+    enum SliderPhase: Equatable {
+        case changed
+        case ended
+    }
+
     case setSwitch(Bool)
     case setDisclosureExpanded(Bool)
     case setSelection(controlID: String, optionID: String)
     case setNavigationSelection(controlID: String, optionID: String)
     case clearNavigationSelection(controlID: String)
     case setDate(controlID: String, value: Date)
+    case setSlider(controlID: String, value: Double, phase: SliderPhase)
 }
 
 enum PluginPanelDescriptionTone {
@@ -67,6 +73,7 @@ enum PluginPanelControlKind {
     case datePicker
     case selectList
     case navigationList
+    case slider
 }
 
 enum PluginPanelDatePickerStyle {
@@ -96,7 +103,43 @@ struct PluginPanelControl: Identifiable {
     let displayedComponents: DatePickerComponents?
     let datePickerStyle: PluginPanelDatePickerStyle?
     let sectionTitle: String?
+    let sliderValue: Double?
+    let sliderBounds: ClosedRange<Double>?
+    let sliderStep: Double?
+    let valueLabel: String?
     let isEnabled: Bool
+
+    init(
+        id: String,
+        kind: PluginPanelControlKind,
+        options: [PluginPanelControlOption],
+        selectedOptionID: String?,
+        dateValue: Date?,
+        minimumDate: Date?,
+        displayedComponents: DatePickerComponents?,
+        datePickerStyle: PluginPanelDatePickerStyle?,
+        sectionTitle: String?,
+        sliderValue: Double? = nil,
+        sliderBounds: ClosedRange<Double>? = nil,
+        sliderStep: Double? = nil,
+        valueLabel: String? = nil,
+        isEnabled: Bool
+    ) {
+        self.id = id
+        self.kind = kind
+        self.options = options
+        self.selectedOptionID = selectedOptionID
+        self.dateValue = dateValue
+        self.minimumDate = minimumDate
+        self.displayedComponents = displayedComponents
+        self.datePickerStyle = datePickerStyle
+        self.sectionTitle = sectionTitle
+        self.sliderValue = sliderValue
+        self.sliderBounds = sliderBounds
+        self.sliderStep = sliderStep
+        self.valueLabel = valueLabel
+        self.isEnabled = isEnabled
+    }
 }
 
 struct PluginPanelSecondaryPanel {

@@ -30,7 +30,12 @@ final class PluginHost: ObservableObject {
 
     convenience init() {
         self.init(
-            plugins: [DisplayResolutionPlugin(), KeepAwakePlugin(), PhysicalCleanModePlugin()],
+            plugins: [
+                DisplayBrightnessPlugin(),
+                DisplayResolutionPlugin(),
+                KeepAwakePlugin(),
+                PhysicalCleanModePlugin()
+            ],
             shortcutStore: ShortcutStore(),
             pluginDisplayPreferencesStore: PluginDisplayPreferencesStore(),
             globalShortcutManager: GlobalShortcutManager()
@@ -157,6 +162,20 @@ final class PluginHost: ObservableObject {
         }
 
         plugin.handlePanelAction(.setDate(controlID: controlID, value: date))
+        rebuildDerivedState()
+    }
+
+    func setPanelSliderValue(
+        _ value: Double,
+        controlID: String,
+        for pluginID: String,
+        phase: PluginPanelAction.SliderPhase
+    ) {
+        guard let plugin = plugin(for: pluginID) else {
+            return
+        }
+
+        plugin.handlePanelAction(.setSlider(controlID: controlID, value: value, phase: phase))
         rebuildDerivedState()
     }
 
