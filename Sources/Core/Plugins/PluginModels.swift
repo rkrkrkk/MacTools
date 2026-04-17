@@ -19,6 +19,7 @@ enum PluginPanelAction: Equatable {
     case clearNavigationSelection(controlID: String)
     case setDate(controlID: String, value: Date)
     case setSlider(controlID: String, value: Double, phase: SliderPhase)
+    case invokeAction(controlID: String)
 }
 
 enum PluginPanelDescriptionTone {
@@ -74,6 +75,7 @@ enum PluginPanelControlKind {
     case selectList
     case navigationList
     case slider
+    case actionRow
 }
 
 enum PluginPanelDatePickerStyle {
@@ -107,6 +109,10 @@ struct PluginPanelControl: Identifiable {
     let sliderBounds: ClosedRange<Double>?
     let sliderStep: Double?
     let valueLabel: String?
+    let actionTitle: String?
+    let actionIconSystemName: String?
+    let actionBehavior: PluginMenuActionBehavior
+    let showsLeadingDivider: Bool
     let isEnabled: Bool
 
     init(
@@ -123,6 +129,10 @@ struct PluginPanelControl: Identifiable {
         sliderBounds: ClosedRange<Double>? = nil,
         sliderStep: Double? = nil,
         valueLabel: String? = nil,
+        actionTitle: String? = nil,
+        actionIconSystemName: String? = nil,
+        actionBehavior: PluginMenuActionBehavior = .keepPresented,
+        showsLeadingDivider: Bool = false,
         isEnabled: Bool
     ) {
         self.id = id
@@ -138,6 +148,10 @@ struct PluginPanelControl: Identifiable {
         self.sliderBounds = sliderBounds
         self.sliderStep = sliderStep
         self.valueLabel = valueLabel
+        self.actionTitle = actionTitle
+        self.actionIconSystemName = actionIconSystemName
+        self.actionBehavior = actionBehavior
+        self.showsLeadingDivider = showsLeadingDivider
         self.isEnabled = isEnabled
     }
 }

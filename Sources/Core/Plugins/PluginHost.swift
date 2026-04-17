@@ -179,6 +179,15 @@ final class PluginHost: ObservableObject {
         rebuildDerivedState()
     }
 
+    func invokePanelAction(controlID: String, for pluginID: String) {
+        guard let plugin = plugin(for: pluginID) else {
+            return
+        }
+
+        plugin.handlePanelAction(.invokeAction(controlID: controlID))
+        rebuildDerivedState()
+    }
+
     func performSettingsAction(pluginID: String, actionID: String) {
         guard let plugin = plugin(for: pluginID) else {
             return

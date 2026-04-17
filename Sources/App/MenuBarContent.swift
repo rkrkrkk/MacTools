@@ -176,6 +176,11 @@ struct MenuBarContent: View {
         let isOn: Bool
     }
 
+    private struct DeferredActionInvocation {
+        let pluginID: String
+        let controlID: String
+    }
+
     @StateObject private var secondaryPanelController = SecondaryPanelController()
     @StateObject private var hoverCoordinator = HoverSecondaryPanelCoordinator()
     @Environment(\.dismiss) private var dismiss
@@ -183,6 +188,7 @@ struct MenuBarContent: View {
 
     @ObservedObject var pluginHost: PluginHost
     @State private var deferredPanelSwitchAction: DeferredPanelSwitchAction?
+    @State private var deferredActionInvocation: DeferredActionInvocation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -225,6 +231,7 @@ struct MenuBarContent: View {
         }
         .onDisappear {
             flushDeferredPanelSwitchActionIfNeeded()
+            flushDeferredActionInvocationIfNeeded()
             hoverCoordinator.dismissImmediately()
             hoverCoordinator.onDismissRequest = nil
             secondaryPanelController.onHostWindowDismissRequest = nil
@@ -260,6 +267,36 @@ struct MenuBarContent: View {
         pluginHost.setSwitchValue(
             deferredPanelSwitchAction.isOn,
             for: deferredPanelSwitchAction.pluginID
+        )
+    }
+
+    private func handleActionInvoke(
+        controlID: String,
+        for item: PluginPanelItem,
+        behavior: PluginMenuActionBehavior
+    ) {
+        switch behavior {
+        case .keepPresented:
+            pluginHost.invokePanelAction(controlID: controlID, for: item.id)
+        case .dismissBeforeHandling:
+            // 先收 popover 再执行，避免动作打开新窗口时菜单还浮在屏上挡视线。
+            deferredActionInvocation = DeferredActionInvocation(
+                pluginID: item.id,
+                controlID: controlID
+            )
+            dismiss()
+        }
+    }
+
+    private func flushDeferredActionInvocationIfNeeded() {
+        guard let deferred = deferredActionInvocation else {
+            return
+        }
+
+        self.deferredActionInvocation = nil
+        pluginHost.invokePanelAction(
+            controlID: deferred.controlID,
+            for: deferred.pluginID
         )
     }
 
@@ -385,6 +422,13 @@ struct MenuBarContent: View {
                             for: item.id,
                             phase: phase
                         )
+                    },
+                    onActionInvoke: { controlID, behavior in
+                        handleActionInvoke(
+                            controlID: controlID,
+                            for: item,
+                            behavior: behavior
+                        )
                     }
                 )
             }
@@ -423,6 +467,7 @@ struct FeatureRowView: View {
     let onDateChange: (String, Date) -> Void
     @State private var isHovered = false
     let onSliderChange: (String, Double, PluginPanelAction.SliderPhase) -> Void
+    let onActionInvoke: (String, PluginMenuActionBehavior) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: detailToDisplay == nil ? 0 : 12) {
@@ -450,7 +495,8 @@ struct FeatureRowView: View {
                     onNavigationHoverChange: onNavigationHoverChange,
                     onNavigationRowFrameChange: onNavigationRowFrameChange,
                     onDateChange: onDateChange,
-                    onSliderChange: onSliderChange
+                    onSliderChange: onSliderChange,
+                    onActionInvoke: onActionInvoke
                 )
                 .padding(.leading, FeatureRowLayout.detailLeadingInset)
             }
@@ -534,10 +580,16 @@ private struct PluginPanelDetailView: View {
     let onNavigationRowFrameChange: (String, String, CGRect?) -> Void
     let onDateChange: (String, Date) -> Void
     let onSliderChange: (String, Double, PluginPanelAction.SliderPhase) -> Void
+    let onActionInvoke: (String, PluginMenuActionBehavior) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(detail.primaryControls) { control in
+                if control.showsLeadingDivider {
+                    Divider()
+                        .padding(.horizontal, FeatureRowLayout.detailControlHorizontalPadding)
+                }
+
                 panelControl(control)
             }
         }
@@ -621,7 +673,54 @@ private struct PluginPanelDetailView: View {
                     onSliderChange(control.id, value, phase)
                 }
             )
+        case .actionRow:
+            ActionRowControl(
+                control: control,
+                onInvoke: {
+                    onActionInvoke(control.id, control.actionBehavior)
+                }
+            )
         }
+    }
+}
+
+private struct ActionRowControl: View {
+    let control: PluginPanelControl
+    let onInvoke: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            guard control.isEnabled else { return }
+            onInvoke()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: control.actionIconSystemName ?? "arrow.up.right.square")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+
+                Text(control.actionTitle ?? "")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, FeatureRowLayout.detailControlHorizontalPadding)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(alignment: .center) {
+                RoundedRectangle(cornerRadius: MenuBarHoverStyle.navigationCornerRadius, style: .continuous)
+                    .inset(by: MenuBarHoverStyle.inset)
+                    .fill(control.isEnabled && isHovered ? MenuBarHoverStyle.fill : Color.clear)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!control.isEnabled)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -949,7 +1048,8 @@ private struct SecondarySlidingPanel: View {
                 onNavigationHoverChange: { _, _, _ in },
                 onNavigationRowFrameChange: { _, _, _ in },
                 onDateChange: onDateChange,
-                onSliderChange: onSliderChange
+                onSliderChange: onSliderChange,
+                onActionInvoke: { _, _ in }
             )
         }
         .padding(12)
@@ -1176,6 +1276,11 @@ private struct MenuWindowAccessor: NSViewRepresentable {
         return view
     }
 
+    // 每次重渲染都把窗口回传给上层 ——上层会调用 syncSecondaryPanelWindow()，
+    // 充当侧栏的兜底刷新（屏幕分辨率切换、popover 短暂不可见等场景下，仅靠 onChange
+    // 钩子可能错过一次需要重新 show() 的时机）。
+    // 必须配合 SecondaryPanelController.show() 中的 NSHostingView 复用，否则会
+    // 在 mouseDown→mouseUp 之间反复重建 contentView，导致按钮点击丢失。
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             onWindowChange(nsView.window)

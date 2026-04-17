@@ -123,7 +123,8 @@ final class PhysicalCleanModePlugin: FeaturePlugin {
              .setNavigationSelection,
              .clearNavigationSelection,
              .setDate,
-             .setSlider:
+             .setSlider,
+             .invokeAction:
             break
         }
     }
