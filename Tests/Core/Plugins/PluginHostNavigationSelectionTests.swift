@@ -40,6 +40,18 @@ final class PluginHostNavigationSelectionTests: XCTestCase {
         }
     }
 
+    func testInvokePanelActionForwardsInvokeActionToPlugin() {
+        let plugin = MockNavigationPlugin()
+        let host = makeHost(plugin: plugin)
+
+        host.invokePanelAction(controlID: "open-system-settings", for: plugin.manifest.id)
+
+        XCTAssertEqual(
+            plugin.receivedActions,
+            [.invokeAction(controlID: "open-system-settings")]
+        )
+    }
+
     private func makeHost(plugin: MockNavigationPlugin) -> PluginHost {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)

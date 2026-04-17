@@ -88,7 +88,8 @@ final class DisplayBrightnessPlugin: FeaturePlugin {
              .setSelection,
              .setNavigationSelection,
              .clearNavigationSelection,
-             .setDate:
+             .setDate,
+             .invokeAction:
             return
         }
     }

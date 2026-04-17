@@ -1,14 +1,36 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import SwiftUI
 
 private enum ControlID {
     static let displayNavigation = "display-navigation"
+    static let openSystemSettings = "display-open-system-settings"
+}
+
+@MainActor
+protocol DisplaySystemSettingsLauncher {
+    @discardableResult
+    func openDisplaySettings() -> Bool
+}
+
+@MainActor
+struct WorkspaceDisplaySystemSettingsLauncher: DisplaySystemSettingsLauncher {
+    // 直接打开「系统设置 → 显示器」，对 Ventura+ 的 System Settings 与
+    // 旧版 System Preferences 都有效。
+    private static let systemDisplaySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.displays")!
+
+    @discardableResult
+    func openDisplaySettings() -> Bool {
+        NSWorkspace.shared.open(Self.systemDisplaySettingsURL)
+    }
 }
 
 @MainActor
 final class DisplayResolutionPlugin: FeaturePlugin {
     private static let unavailableModesSubtitle = "未检测到可用分辨率"
+    private static let openSystemSettingsTitle = "打开系统显示器设置"
+    private static let openSystemSettingsIcon = "gearshape"
 
     let manifest = PluginManifest(
         id: "display-resolution",
@@ -29,9 +51,14 @@ final class DisplayResolutionPlugin: FeaturePlugin {
     private var selectedDisplayID: CGDirectDisplayID?
     private var lastErrorMessage: String?
     private let controller: DisplayResolutionControlling
+    private let systemSettingsLauncher: DisplaySystemSettingsLauncher
 
-    init(controller: DisplayResolutionControlling = DisplayResolutionController()) {
+    init(
+        controller: DisplayResolutionControlling = DisplayResolutionController(),
+        systemSettingsLauncher: DisplaySystemSettingsLauncher = WorkspaceDisplaySystemSettingsLauncher()
+    ) {
         self.controller = controller
+        self.systemSettingsLauncher = systemSettingsLauncher
     }
 
     var panelState: PluginPanelState {
@@ -146,6 +173,15 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             case .failure(let error):
                 handleApplyFailure(error, displayID: displayID, modeId: modeId)
             }
+        case let .invokeAction(controlID):
+            guard controlID == ControlID.openSystemSettings else {
+                return
+            }
+
+            let opened = systemSettingsLauncher.openDisplaySettings()
+            if !opened {
+                AppLog.displayResolutionPlugin.error("failed to open system display settings via NSWorkspace")
+            }
         case .setSwitch, .setDate, .setSlider:
             return
         }
@@ -219,6 +255,23 @@ final class DisplayResolutionPlugin: FeaturePlugin {
             isEnabled: true
         )
 
+        let openSystemSettings = PluginPanelControl(
+            id: ControlID.openSystemSettings,
+            kind: .actionRow,
+            options: [],
+            selectedOptionID: nil,
+            dateValue: nil,
+            minimumDate: nil,
+            displayedComponents: nil,
+            datePickerStyle: nil,
+            sectionTitle: nil,
+            actionTitle: Self.openSystemSettingsTitle,
+            actionIconSystemName: Self.openSystemSettingsIcon,
+            actionBehavior: .dismissBeforeHandling,
+            showsLeadingDivider: true,
+            isEnabled: true
+        )
+
         let secondaryPanel = selectedDisplayID.flatMap { selectedID -> PluginPanelSecondaryPanel? in
             guard let display = displays.first(where: { $0.display.id == selectedID }) else {
                 return nil
@@ -247,7 +300,7 @@ final class DisplayResolutionPlugin: FeaturePlugin {
         }
 
         return PluginPanelDetail(
-            primaryControls: [displayNavigation],
+            primaryControls: [displayNavigation, openSystemSettings],
             secondaryPanel: secondaryPanel
         )
     }

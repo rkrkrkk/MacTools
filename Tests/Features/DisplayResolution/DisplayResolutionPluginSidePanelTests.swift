@@ -28,8 +28,9 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
 
         let detail = try XCTUnwrap(plugin.panelState.detail)
 
-        XCTAssertEqual(detail.primaryControls.count, 1)
+        XCTAssertEqual(detail.primaryControls.count, 2)
         XCTAssertEqual(detail.primaryControls[0].kind, .navigationList)
+        XCTAssertEqual(detail.primaryControls[1].kind, .actionRow)
         XCTAssertNil(detail.secondaryPanel)
     }
 
@@ -133,6 +134,57 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
         XCTAssertNil(state.detail)
     }
 
+    func testExpandedDetailExposesOpenSystemSettingsActionRow() throws {
+        let plugin = makePlugin()
+        plugin.handlePanelAction(.setDisclosureExpanded(true))
+
+        let controls = try XCTUnwrap(plugin.panelState.detail?.primaryControls)
+        let actionRow = try XCTUnwrap(controls.last)
+
+        XCTAssertEqual(actionRow.kind, .actionRow)
+        XCTAssertEqual(actionRow.id, "display-open-system-settings")
+        XCTAssertEqual(actionRow.actionTitle, "打开系统显示器设置")
+        XCTAssertEqual(actionRow.actionIconSystemName, "gearshape")
+        XCTAssertEqual(actionRow.actionBehavior, .dismissBeforeHandling)
+        XCTAssertTrue(actionRow.showsLeadingDivider)
+    }
+
+    func testInvokeOpenSystemSettingsActionAsksLauncherToOpen() {
+        let launcher = MockSystemSettingsLauncher()
+        let controller = MockDisplayResolutionController()
+        controller.displays = [makeDisplay(id: 2, name: "Studio Display", isMain: true)]
+        controller.modesByDisplayID = [
+            2: [makeMode(modeId: 8, width: 1920, height: 1080, isCurrent: true)]
+        ]
+
+        let plugin = DisplayResolutionPlugin(
+            controller: controller,
+            systemSettingsLauncher: launcher
+        )
+        plugin.handlePanelAction(.setDisclosureExpanded(true))
+        plugin.handlePanelAction(.invokeAction(controlID: "display-open-system-settings"))
+
+        XCTAssertEqual(launcher.openCallCount, 1)
+    }
+
+    func testInvokeUnknownActionDoesNotInvokeLauncher() {
+        let launcher = MockSystemSettingsLauncher()
+        let plugin = DisplayResolutionPlugin(
+            controller: MockDisplayResolutionController(),
+            systemSettingsLauncher: launcher
+        )
+
+        plugin.handlePanelAction(.invokeAction(controlID: "something-else"))
+
+        XCTAssertEqual(launcher.openCallCount, 0)
+    }
+
+    func testCollapsedPluginDoesNotExposeActionRow() {
+        let plugin = makePlugin()
+
+        XCTAssertNil(plugin.panelState.detail)
+    }
+
     func testSelectingDifferentDisplayClearsLastErrorMessage() throws {
         let controller = MockDisplayResolutionController()
         controller.displays = [
@@ -214,6 +266,17 @@ final class DisplayResolutionPluginSidePanelTests: XCTestCase {
             modelNumber: nil,
             serialNumber: nil
         )
+    }
+}
+
+@MainActor
+private final class MockSystemSettingsLauncher: DisplaySystemSettingsLauncher {
+    private(set) var openCallCount = 0
+
+    @discardableResult
+    func openDisplaySettings() -> Bool {
+        openCallCount += 1
+        return true
     }
 }
 
