@@ -1,14 +1,14 @@
 import Darwin
 import Foundation
 
-struct DiskCleanFileItem: Equatable {
+struct DiskCleanFileItem: Equatable, Sendable {
     let path: String
     let isDirectory: Bool
     let isSymlink: Bool
     let resolvedSymlinkTarget: String?
 }
 
-protocol DiskCleanFileSystemProviding {
+protocol DiskCleanFileSystemProviding: Sendable {
     func expandPathPattern(_ pattern: String) throws -> [DiskCleanFileItem]
     func itemInfo(at path: String) throws -> DiskCleanFileItem?
     func sizeOfItem(at path: String) throws -> Int64
@@ -16,7 +16,7 @@ protocol DiskCleanFileSystemProviding {
     func deduplicatedParentChildPaths(_ paths: [String]) -> [String]
 }
 
-struct LocalDiskCleanFileSystem: DiskCleanFileSystemProviding {
+struct LocalDiskCleanFileSystem: DiskCleanFileSystemProviding, @unchecked Sendable {
     private let fileManager: FileManager
     private let homeDirectory: String
 

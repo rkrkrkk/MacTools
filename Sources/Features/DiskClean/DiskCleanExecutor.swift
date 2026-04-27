@@ -1,14 +1,14 @@
 import Foundation
 
-protocol DiskCleanExecuting {
+protocol DiskCleanExecuting: Sendable {
     func clean(
         candidates: [DiskCleanCandidate],
         selectedCandidateIDs: Set<DiskCleanCandidate.ID>
     ) async throws -> DiskCleanExecutionResult
 }
 
-struct DiskCleanExecutionItemResult: Equatable {
-    enum Outcome: Equatable {
+struct DiskCleanExecutionItemResult: Equatable, Sendable {
+    enum Outcome: Equatable, Sendable {
         case removed(reclaimedBytes: Int64)
         case skipped(DiskCleanSafetyStatus)
         case failed(message: String)
@@ -26,7 +26,7 @@ struct DiskCleanExecutionItemResult: Equatable {
     }
 }
 
-struct DiskCleanExecutionResult: Equatable {
+struct DiskCleanExecutionResult: Equatable, Sendable {
     let itemResults: [DiskCleanExecutionItemResult]
 
     var removedCount: Int {

@@ -139,7 +139,7 @@ final class DiskCleanExecutorTests: XCTestCase {
 
 private struct TestRemoveError: Error {}
 
-private final class FakeDiskCleanExecutorFileSystem: DiskCleanFileSystemProviding {
+private final class FakeDiskCleanExecutorFileSystem: DiskCleanFileSystemProviding, @unchecked Sendable {
     var items: [String: DiskCleanFileItem]
     var removeErrors: [String: Error]
 

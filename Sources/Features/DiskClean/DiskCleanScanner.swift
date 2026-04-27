@@ -1,10 +1,10 @@
 import Foundation
 
-protocol DiskCleanScanning {
+protocol DiskCleanScanning: Sendable {
     func scan(choices: Set<DiskCleanChoice>) async throws -> DiskCleanScanResult
 }
 
-protocol DiskCleanProcessInspecting {
+protocol DiskCleanProcessInspecting: Sendable {
     func runningProcessName(from names: [String]) -> String?
 }
 
@@ -41,14 +41,14 @@ struct DiskCleanScanner: DiskCleanScanning {
     let fileSystem: DiskCleanFileSystemProviding
     let safetyPolicy: DiskCleanSafetyPolicy
     let processInspector: DiskCleanProcessInspecting
-    let now: () -> Date
+    let now: @Sendable () -> Date
 
     init(
         ruleCatalog: DiskCleanRuleCatalog = .moleFirstVersion,
         fileSystem: DiskCleanFileSystemProviding = LocalDiskCleanFileSystem(),
         safetyPolicy: DiskCleanSafetyPolicy = DiskCleanSafetyPolicy(),
         processInspector: DiskCleanProcessInspecting = LocalDiskCleanProcessInspector(),
-        now: @escaping () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.ruleCatalog = ruleCatalog
         self.fileSystem = fileSystem

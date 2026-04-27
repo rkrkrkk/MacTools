@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
 
-struct DiskCleanWhitelistRule: Identifiable, Hashable {
-    enum Source: Hashable {
+struct DiskCleanWhitelistRule: Identifiable, Hashable, Sendable {
+    enum Source: Hashable, Sendable {
         case defaultRule
         case custom
     }
@@ -14,7 +14,7 @@ struct DiskCleanWhitelistRule: Identifiable, Hashable {
     var id: String { expandedPattern }
 }
 
-enum DiskCleanWhitelistValidationError: Error, Equatable {
+enum DiskCleanWhitelistValidationError: Error, Equatable, Sendable {
     case empty
     case relativePath
     case traversal
@@ -22,7 +22,7 @@ enum DiskCleanWhitelistValidationError: Error, Equatable {
     case protectedSystemRoot
 }
 
-struct DiskCleanWhitelistStore {
+struct DiskCleanWhitelistStore: Sendable {
     static let finderMetadataSentinel = "FINDER_METADATA"
 
     static let defaultRulePatterns: [String] = [

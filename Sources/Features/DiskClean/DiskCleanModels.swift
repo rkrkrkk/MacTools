@@ -1,6 +1,6 @@
 import Foundation
 
-enum DiskCleanChoice: String, CaseIterable, Identifiable, Equatable {
+enum DiskCleanChoice: String, CaseIterable, Identifiable, Equatable, Sendable {
     case cache
     case developer
     case browser
@@ -19,13 +19,13 @@ enum DiskCleanChoice: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
-enum DiskCleanRisk: Equatable {
+enum DiskCleanRisk: Equatable, Sendable {
     case low
     case medium
     case high
 }
 
-enum DiskCleanSafetyStatus: Equatable {
+enum DiskCleanSafetyStatus: Equatable, Sendable {
     case allowed
     case whitelisted(rule: String)
     case protected(reason: String)
@@ -41,7 +41,7 @@ enum DiskCleanSafetyStatus: Equatable {
     }
 }
 
-struct DiskCleanCandidate: Identifiable, Equatable {
+struct DiskCleanCandidate: Identifiable, Equatable, Sendable {
     let id: String
     let ruleID: String
     let choice: DiskCleanChoice
@@ -52,7 +52,7 @@ struct DiskCleanCandidate: Identifiable, Equatable {
     let risk: DiskCleanRisk
 }
 
-struct DiskCleanScanResult: Equatable {
+struct DiskCleanScanResult: Equatable, Sendable {
     let choices: Set<DiskCleanChoice>
     let candidates: [DiskCleanCandidate]
     let scannedAt: Date

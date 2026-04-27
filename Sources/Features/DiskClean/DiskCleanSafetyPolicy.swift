@@ -1,6 +1,6 @@
 import Foundation
 
-struct DiskCleanSafetyPolicy {
+struct DiskCleanSafetyPolicy: Sendable {
     let homeDirectory: String
     let whitelistStore: DiskCleanWhitelistStore
 

@@ -1,6 +1,6 @@
 import Foundation
 
-enum DiskCleanDynamicRule: String, Equatable {
+enum DiskCleanDynamicRule: String, Equatable, Sendable {
     case xcodeDerivedData
     case unavailableSimulators
     case npmCache
@@ -16,8 +16,8 @@ enum DiskCleanDynamicRule: String, Equatable {
     case oldBrowserVersions
 }
 
-struct DiskCleanRule: Identifiable, Equatable {
-    enum Target: Equatable {
+struct DiskCleanRule: Identifiable, Equatable, Sendable {
+    enum Target: Equatable, Sendable {
         case path(String)
         case dynamic(DiskCleanDynamicRule)
     }
@@ -49,7 +49,7 @@ struct DiskCleanRule: Identifiable, Equatable {
     }
 }
 
-struct DiskCleanRuleCatalog: Equatable {
+struct DiskCleanRuleCatalog: Equatable, Sendable {
     let rules: [DiskCleanRule]
 
     static let moleFirstVersion = DiskCleanRuleCatalog(

@@ -184,7 +184,7 @@ final class DiskCleanScannerTests: XCTestCase {
     }
 }
 
-private final class FakeDiskCleanFileSystem: DiskCleanFileSystemProviding {
+private final class FakeDiskCleanFileSystem: DiskCleanFileSystemProviding, @unchecked Sendable {
     let expansions: [String: [DiskCleanFileItem]]
     let sizes: [String: Int64]
 
