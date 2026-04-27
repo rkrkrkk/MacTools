@@ -1,7 +1,18 @@
 import Foundation
 
+typealias DiskCleanScanProgressHandler = @Sendable (DiskCleanScanLogMessage) async -> Void
+
 protocol DiskCleanScanning: Sendable {
-    func scan(choices: Set<DiskCleanChoice>) async throws -> DiskCleanScanResult
+    func scan(
+        choices: Set<DiskCleanChoice>,
+        progress: DiskCleanScanProgressHandler
+    ) async throws -> DiskCleanScanResult
+}
+
+extension DiskCleanScanning {
+    func scan(choices: Set<DiskCleanChoice>) async throws -> DiskCleanScanResult {
+        try await scan(choices: choices, progress: { _ in })
+    }
 }
 
 protocol DiskCleanProcessInspecting: Sendable {
@@ -57,14 +68,42 @@ struct DiskCleanScanner: DiskCleanScanning {
         self.now = now
     }
 
-    func scan(choices: Set<DiskCleanChoice>) async throws -> DiskCleanScanResult {
+    func scan(
+        choices: Set<DiskCleanChoice>,
+        progress: DiskCleanScanProgressHandler
+    ) async throws -> DiskCleanScanResult {
         var expandedItems: [ExpandedItem] = []
+        var currentChoice: DiskCleanChoice?
 
         for rule in ruleCatalog.rules where choices.contains(rule.choice) {
             try Task.checkCancellation()
+
+            if currentChoice != rule.choice {
+                currentChoice = rule.choice
+                await progress(
+                    DiskCleanScanLogMessage(
+                        text: "扫描范围：\(rule.choice.title)",
+                        tone: .info
+                    )
+                )
+            }
+
+            await progress(
+                DiskCleanScanLogMessage(
+                    text: "展开规则：\(rule.title)",
+                    tone: .info
+                )
+            )
+
             for target in rule.targets {
                 try Task.checkCancellation()
                 let items = try expand(target)
+                await progress(
+                    DiskCleanScanLogMessage(
+                        text: "匹配 \(items.count) 项：\(rule.title)",
+                        tone: items.isEmpty ? .info : .success
+                    )
+                )
                 expandedItems += items.map { ExpandedItem(rule: rule, item: $0) }
             }
         }
@@ -74,12 +113,23 @@ struct DiskCleanScanner: DiskCleanScanning {
             uniquingKeysWith: { first, _ in first }
         )
         let deduplicatedPaths = fileSystem.deduplicatedParentChildPaths(expandedItems.map(\.item.path))
-        let candidates = deduplicatedPaths.compactMap { path -> DiskCleanCandidate? in
+        var candidates: [DiskCleanCandidate] = []
+        for path in deduplicatedPaths {
+            try Task.checkCancellation()
             guard let expandedItem = firstItemByPath[path] else {
-                return nil
+                continue
             }
-            return makeCandidate(from: expandedItem)
+            let candidate = makeCandidate(from: expandedItem)
+            candidates.append(candidate)
+            await progress(logMessage(for: candidate))
         }
+
+        await progress(
+            DiskCleanScanLogMessage(
+                text: "扫描完成：\(candidates.count) 项，\(candidates.filter { $0.safety.isCleanable }.count) 项可清理",
+                tone: .success
+            )
+        )
 
         return DiskCleanScanResult(
             choices: choices,
@@ -170,6 +220,23 @@ struct DiskCleanScanner: DiskCleanScanning {
             safety: safety,
             risk: rule.risk
         )
+    }
+
+    private func logMessage(for candidate: DiskCleanCandidate) -> DiskCleanScanLogMessage {
+        switch candidate.safety {
+        case .allowed:
+            return DiskCleanScanLogMessage(text: "可清理：\(candidate.path)", tone: .success)
+        case .whitelisted:
+            return DiskCleanScanLogMessage(text: "白名单保护：\(candidate.path)", tone: .warning)
+        case .protected:
+            return DiskCleanScanLogMessage(text: "敏感数据保护：\(candidate.path)", tone: .warning)
+        case .invalid:
+            return DiskCleanScanLogMessage(text: "路径安全保护：\(candidate.path)", tone: .warning)
+        case .requiresAdmin:
+            return DiskCleanScanLogMessage(text: "需要管理员权限：\(candidate.path)", tone: .warning)
+        case let .inUse(processName):
+            return DiskCleanScanLogMessage(text: "正在使用(\(processName))：\(candidate.path)", tone: .warning)
+        }
     }
 
     private func safetyStatus(

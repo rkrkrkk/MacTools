@@ -17,6 +17,27 @@ struct DiskCleanControllerSnapshot: Equatable, Sendable {
     let isTestModeEnabled: Bool
     let isResultStale: Bool
     let errorMessage: String?
+    let scanLogEntries: [DiskCleanScanLogEntry]
+
+    init(
+        phase: DiskCleanControllerPhase,
+        selectedChoices: Set<DiskCleanChoice>,
+        scanResult: DiskCleanScanResult?,
+        executionResult: DiskCleanExecutionResult?,
+        isTestModeEnabled: Bool,
+        isResultStale: Bool,
+        errorMessage: String?,
+        scanLogEntries: [DiskCleanScanLogEntry] = []
+    ) {
+        self.phase = phase
+        self.selectedChoices = selectedChoices
+        self.scanResult = scanResult
+        self.executionResult = executionResult
+        self.isTestModeEnabled = isTestModeEnabled
+        self.isResultStale = isResultStale
+        self.errorMessage = errorMessage
+        self.scanLogEntries = scanLogEntries
+    }
 
     var subtitle: String {
         switch phase {
@@ -89,6 +110,7 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
 
     private var currentTask: Task<Void, Never>?
     private var currentOperationID: UUID?
+    private var nextLogEntryID = 1
 
     init(
         scanner: DiskCleanScanning = DiskCleanScanner(),
@@ -119,7 +141,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
             executionResult: snapshot.executionResult,
             isTestModeEnabled: snapshot.isTestModeEnabled,
             isResultStale: isStale(scanResult: snapshot.scanResult, selectedChoices: nextChoices),
-            errorMessage: snapshot.errorMessage
+            errorMessage: snapshot.errorMessage,
+            scanLogEntries: snapshot.scanLogEntries
         )
     }
 
@@ -133,7 +156,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
             executionResult: snapshot.executionResult,
             isTestModeEnabled: isEnabled,
             isResultStale: snapshot.isResultStale,
-            errorMessage: snapshot.errorMessage
+            errorMessage: snapshot.errorMessage,
+            scanLogEntries: snapshot.scanLogEntries
         )
     }
 
@@ -143,22 +167,37 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
         cancelTaskOnly()
 
         let selectedChoices = snapshot.selectedChoices
+        let isTestModeEnabled = snapshot.isTestModeEnabled
         let operationID = UUID()
         currentOperationID = operationID
+        nextLogEntryID = 1
+        let initialLogEntries = [
+            makeLogEntry(
+                DiskCleanScanLogMessage(
+                    text: "开始扫描：\(selectedChoiceTitleList(selectedChoices))",
+                    tone: .info
+                )
+            )
+        ]
         snapshot = DiskCleanControllerSnapshot(
             phase: .scanning,
             selectedChoices: selectedChoices,
             scanResult: nil,
             executionResult: nil,
-            isTestModeEnabled: snapshot.isTestModeEnabled,
+            isTestModeEnabled: isTestModeEnabled,
             isResultStale: false,
-            errorMessage: nil
+            errorMessage: nil,
+            scanLogEntries: initialLogEntries
         )
 
         currentTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let result = try await scanner.scan(choices: selectedChoices)
+                let result = try await scanner.scan(choices: selectedChoices) { [weak self] message in
+                    await MainActor.run {
+                        self?.appendScanLog(message)
+                    }
+                }
                 guard isCurrentOperation(operationID) else { return }
                 snapshot = DiskCleanControllerSnapshot(
                     phase: .scanned,
@@ -167,7 +206,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: nil,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: nil
+                    errorMessage: nil,
+                    scanLogEntries: snapshot.scanLogEntries
                 )
                 finishOperation(operationID)
             } catch is CancellationError {
@@ -179,7 +219,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: nil,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: nil
+                    errorMessage: nil,
+                    scanLogEntries: snapshot.scanLogEntries
                 )
                 finishOperation(operationID)
             } catch {
@@ -191,7 +232,15 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: nil,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: Self.userFacingMessage(for: error)
+                    errorMessage: Self.userFacingMessage(for: error),
+                    scanLogEntries: snapshot.scanLogEntries + [
+                        makeLogEntry(
+                            DiskCleanScanLogMessage(
+                                text: "扫描失败：\(Self.userFacingMessage(for: error))",
+                                tone: .error
+                            )
+                        )
+                    ]
                 )
                 finishOperation(operationID)
             }
@@ -213,7 +262,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
             executionResult: nil,
             isTestModeEnabled: snapshot.isTestModeEnabled,
             isResultStale: false,
-            errorMessage: nil
+            errorMessage: nil,
+            scanLogEntries: snapshot.scanLogEntries
         )
 
         currentTask = Task { @MainActor [weak self] in
@@ -231,7 +281,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: executionResult,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: nil
+                    errorMessage: nil,
+                    scanLogEntries: snapshot.scanLogEntries
                 )
                 finishOperation(operationID)
             } catch is CancellationError {
@@ -243,7 +294,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: nil,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: nil
+                    errorMessage: nil,
+                    scanLogEntries: snapshot.scanLogEntries
                 )
                 finishOperation(operationID)
             } catch {
@@ -255,7 +307,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                     executionResult: nil,
                     isTestModeEnabled: snapshot.isTestModeEnabled,
                     isResultStale: false,
-                    errorMessage: Self.userFacingMessage(for: error)
+                    errorMessage: Self.userFacingMessage(for: error),
+                    scanLogEntries: snapshot.scanLogEntries
                 )
                 finishOperation(operationID)
             }
@@ -268,6 +321,7 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
         let scanResult = snapshot.scanResult
         let isTestModeEnabled = snapshot.isTestModeEnabled
         let isResultStale = snapshot.isResultStale
+        let scanLogEntries = snapshot.scanLogEntries
 
         cancelTaskOnly()
 
@@ -280,7 +334,10 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                 executionResult: nil,
                 isTestModeEnabled: isTestModeEnabled,
                 isResultStale: false,
-                errorMessage: nil
+                errorMessage: nil,
+                scanLogEntries: scanLogEntries + [
+                    makeLogEntry(DiskCleanScanLogMessage(text: "扫描已停止", tone: .warning))
+                ]
             )
         case .cleaning:
             snapshot = DiskCleanControllerSnapshot(
@@ -290,7 +347,8 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
                 executionResult: nil,
                 isTestModeEnabled: isTestModeEnabled,
                 isResultStale: isResultStale,
-                errorMessage: nil
+                errorMessage: nil,
+                scanLogEntries: scanLogEntries
             )
         case .idle, .scanned, .completed:
             break
@@ -307,6 +365,41 @@ final class DiskCleanController: ObservableObject, DiskCleanControlling {
         guard isCurrentOperation(operationID) else { return }
         currentTask = nil
         currentOperationID = nil
+    }
+
+    private func appendScanLog(_ message: DiskCleanScanLogMessage) {
+        var entries = snapshot.scanLogEntries
+        entries.append(makeLogEntry(message))
+        if entries.count > 500 {
+            entries.removeFirst(entries.count - 500)
+        }
+
+        snapshot = DiskCleanControllerSnapshot(
+            phase: snapshot.phase,
+            selectedChoices: snapshot.selectedChoices,
+            scanResult: snapshot.scanResult,
+            executionResult: snapshot.executionResult,
+            isTestModeEnabled: snapshot.isTestModeEnabled,
+            isResultStale: snapshot.isResultStale,
+            errorMessage: snapshot.errorMessage,
+            scanLogEntries: entries
+        )
+    }
+
+    private func makeLogEntry(_ message: DiskCleanScanLogMessage) -> DiskCleanScanLogEntry {
+        defer { nextLogEntryID += 1 }
+        return DiskCleanScanLogEntry(
+            id: nextLogEntryID,
+            text: message.text,
+            tone: message.tone
+        )
+    }
+
+    private func selectedChoiceTitleList(_ choices: Set<DiskCleanChoice>) -> String {
+        DiskCleanChoice.allCases
+            .filter { choices.contains($0) }
+            .map(\.title)
+            .joined(separator: "、")
     }
 
     private func isCurrentOperation(_ operationID: UUID) -> Bool {

@@ -138,6 +138,39 @@ final class DiskCleanControllerTests: XCTestCase {
         XCTAssertEqual(executor.cleanCalls.count, 0)
     }
 
+    func testScanProgressLogUpdatesSnapshotWhileScanIsRunning() async {
+        let result = scanResult(choices: Set(DiskCleanChoice.allCases))
+        let scanner = FakeDiskCleanControllerScanner(
+            result: result,
+            progressMessages: [
+                DiskCleanScanLogMessage(text: "展开规则：Cache", tone: .info),
+                DiskCleanScanLogMessage(text: "可清理：/Users/tester/Library/Caches/App", tone: .success)
+            ],
+            delayNanoseconds: 40_000_000
+        )
+        let controller = makeController(scanner: scanner)
+
+        controller.scan()
+
+        await waitUntil {
+            controller.snapshot.scanLogEntries.contains {
+                $0.text == "可清理：/Users/tester/Library/Caches/App"
+            }
+        }
+        XCTAssertEqual(controller.snapshot.phase, .scanning)
+        XCTAssertEqual(
+            controller.snapshot.scanLogEntries.map(\.text),
+            [
+                "开始扫描：缓存清理、开发者缓存清理、浏览器缓存清理",
+                "展开规则：Cache",
+                "可清理：/Users/tester/Library/Caches/App"
+            ]
+        )
+
+        await waitUntil { controller.snapshot.phase == .scanned }
+        XCTAssertEqual(controller.snapshot.scanLogEntries.last?.text, "可清理：/Users/tester/Library/Caches/App")
+    }
+
     private func makeController(
         scanner: DiskCleanScanning = FakeDiskCleanControllerScanner(),
         executor: DiskCleanExecuting = FakeDiskCleanControllerExecutor()
@@ -189,6 +222,7 @@ private struct TestDiskCleanControllerError: LocalizedError {
 private final class FakeDiskCleanControllerScanner: DiskCleanScanning, @unchecked Sendable {
     var result: DiskCleanScanResult
     var error: Error?
+    var progressMessages: [DiskCleanScanLogMessage]
     var delayNanoseconds: UInt64
     private(set) var scanCalls: [Set<DiskCleanChoice>] = []
 
@@ -199,15 +233,23 @@ private final class FakeDiskCleanControllerScanner: DiskCleanScanning, @unchecke
             scannedAt: Date(timeIntervalSince1970: 0)
         ),
         error: Error? = nil,
+        progressMessages: [DiskCleanScanLogMessage] = [],
         delayNanoseconds: UInt64 = 0
     ) {
         self.result = result
         self.error = error
+        self.progressMessages = progressMessages
         self.delayNanoseconds = delayNanoseconds
     }
 
-    func scan(choices: Set<DiskCleanChoice>) async throws -> DiskCleanScanResult {
+    func scan(
+        choices: Set<DiskCleanChoice>,
+        progress: DiskCleanScanProgressHandler
+    ) async throws -> DiskCleanScanResult {
         scanCalls.append(choices)
+        for message in progressMessages {
+            await progress(message)
+        }
         if delayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: delayNanoseconds)
         }

@@ -152,6 +152,38 @@ final class DiskCleanScannerTests: XCTestCase {
         XCTAssertEqual(result.cleanableSizeBytes, 125)
     }
 
+    func testScanEmitsProgressMessagesForRulesCandidatesAndCompletion() async throws {
+        let cachePath = "\(home)/Library/Caches/App"
+        let fileSystem = FakeDiskCleanFileSystem(
+            expansions: ["\(home)/Library/Caches/App": [item(cachePath)]],
+            sizes: [cachePath: 10]
+        )
+        let catalog = DiskCleanRuleCatalog(rules: [
+            DiskCleanRule(
+                id: "cache",
+                choice: .cache,
+                title: "Cache",
+                risk: .low,
+                targets: [.path("\(home)/Library/Caches/App")]
+            )
+        ])
+        let scanner = makeScanner(catalog: catalog, fileSystem: fileSystem)
+        let recorder = DiskCleanProgressRecorder()
+
+        _ = try await scanner.scan(choices: [.cache]) { message in
+            await recorder.record(message)
+        }
+
+        let messages = await recorder.messages()
+        let texts = messages.map(\.text)
+
+        XCTAssertTrue(texts.contains("扫描范围：缓存清理"))
+        XCTAssertTrue(texts.contains("展开规则：Cache"))
+        XCTAssertTrue(texts.contains("匹配 1 项：Cache"))
+        XCTAssertTrue(texts.contains("可清理：\(cachePath)"))
+        XCTAssertEqual(texts.last, "扫描完成：1 项，1 项可清理")
+    }
+
     private func makeScanner(
         catalog: DiskCleanRuleCatalog,
         fileSystem: FakeDiskCleanFileSystem,
@@ -241,5 +273,17 @@ private struct FakeDiskCleanProcessInspector: DiskCleanProcessInspecting {
 
     func runningProcessName(from names: [String]) -> String? {
         names.first { runningProcessNames.contains($0) }
+    }
+}
+
+private actor DiskCleanProgressRecorder {
+    private var recordedMessages: [DiskCleanScanLogMessage] = []
+
+    func record(_ message: DiskCleanScanLogMessage) {
+        recordedMessages.append(message)
+    }
+
+    func messages() -> [DiskCleanScanLogMessage] {
+        recordedMessages
     }
 }

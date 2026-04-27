@@ -41,6 +41,24 @@ enum DiskCleanSafetyStatus: Equatable, Sendable {
     }
 }
 
+enum DiskCleanScanLogTone: Equatable, Sendable {
+    case info
+    case success
+    case warning
+    case error
+}
+
+struct DiskCleanScanLogMessage: Equatable, Sendable {
+    let text: String
+    let tone: DiskCleanScanLogTone
+}
+
+struct DiskCleanScanLogEntry: Identifiable, Equatable, Sendable {
+    let id: Int
+    let text: String
+    let tone: DiskCleanScanLogTone
+}
+
 struct DiskCleanCandidate: Identifiable, Equatable, Sendable {
     let id: String
     let ruleID: String

@@ -9,6 +9,7 @@ struct DiskCleanDetailView: View {
             choiceControls
             testModeControl
             actionBar
+            scanLog
             statusSummary
             candidateList
         }
@@ -91,6 +92,69 @@ struct DiskCleanDetailView: View {
                 }
             }
         }
+    }
+
+    private var scanLog: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("扫描日志")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if snapshot.phase == .scanning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.75)
+                }
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        if snapshot.scanLogEntries.isEmpty {
+                            Text("点击扫描后显示实时进度")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(snapshot.scanLogEntries) { entry in
+                                logRow(entry)
+                                    .id(entry.id)
+                            }
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(minHeight: 118, maxHeight: 160)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+                .onChange(of: snapshot.scanLogEntries.last?.id) {
+                    guard let id = snapshot.scanLogEntries.last?.id else { return }
+                    proxy.scrollTo(id, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private func logRow(_ entry: DiskCleanScanLogEntry) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: logIconName(entry.tone))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(logColor(entry.tone))
+                .frame(width: 14, height: 14)
+
+            Text(entry.text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .lineLimit(3)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -210,5 +274,31 @@ struct DiskCleanDetailView: View {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+
+    private func logIconName(_ tone: DiskCleanScanLogTone) -> String {
+        switch tone {
+        case .info:
+            return "circle"
+        case .success:
+            return "checkmark.circle.fill"
+        case .warning:
+            return "shield.fill"
+        case .error:
+            return "xmark.octagon.fill"
+        }
+    }
+
+    private func logColor(_ tone: DiskCleanScanLogTone) -> Color {
+        switch tone {
+        case .info:
+            return .secondary
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        }
     }
 }
