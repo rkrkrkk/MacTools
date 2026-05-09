@@ -16,17 +16,23 @@ struct MacToolsApp: App {
 final class MacToolsAppDelegate: NSObject, NSApplicationDelegate {
     private let pluginHost = PluginHost()
     private let appUpdater = AppUpdater()
+    private let menuBarIconSettings = MenuBarIconSettings()
     private var windowRouter: AppWindowRouter?
     private var statusItemController: MenuBarStatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppAppearancePreference.applyStoredPreference()
 
-        let windowRouter = AppWindowRouter(pluginHost: pluginHost, appUpdater: appUpdater)
+        let windowRouter = AppWindowRouter(
+            pluginHost: pluginHost,
+            appUpdater: appUpdater,
+            menuBarIconSettings: menuBarIconSettings
+        )
         self.windowRouter = windowRouter
         statusItemController = MenuBarStatusItemController(
             pluginHost: pluginHost,
-            windowRouter: windowRouter
+            windowRouter: windowRouter,
+            iconSettings: menuBarIconSettings
         )
     }
 

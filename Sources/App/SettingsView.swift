@@ -4,10 +4,14 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var pluginHost: PluginHost
     @ObservedObject var appUpdater: AppUpdater
+    @ObservedObject var menuBarIconSettings: MenuBarIconSettings
 
     var body: some View {
         TabView(selection: $pluginHost.selectedSettingsDestination) {
-            GeneralSettingsView(pluginHost: pluginHost)
+            GeneralSettingsView(
+                pluginHost: pluginHost,
+                menuBarIconSettings: menuBarIconSettings
+            )
                 .tag(SettingsDestination.general)
                 .tabItem {
                     Label("通用", systemImage: "gearshape")
@@ -74,6 +78,7 @@ private struct PermissionSettingsRow: View {
 
 struct GeneralSettingsView: View {
     @ObservedObject var pluginHost: PluginHost
+    @ObservedObject var menuBarIconSettings: MenuBarIconSettings
     @AppStorage(AppAppearancePreference.userDefaultsKey) private var appearancePreferenceRawValue = AppAppearancePreference.system.rawValue
 
     var body: some View {
@@ -82,6 +87,12 @@ struct GeneralSettingsView: View {
                 AppearanceSettingsRow(selection: appearancePreferenceBinding)
             } header: {
                 Text("外观")
+            }
+
+            Section {
+                MenuBarIconSettingsView(iconSettings: menuBarIconSettings)
+            } header: {
+                Text("状态栏图标")
             }
 
             Section {

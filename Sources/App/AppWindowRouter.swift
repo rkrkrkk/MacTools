@@ -5,11 +5,17 @@ import SwiftUI
 final class AppWindowRouter {
     private let pluginHost: PluginHost
     private let appUpdater: AppUpdater
+    private let menuBarIconSettings: MenuBarIconSettings
     private var settingsWindow: NSWindow?
 
-    init(pluginHost: PluginHost, appUpdater: AppUpdater) {
+    init(
+        pluginHost: PluginHost,
+        appUpdater: AppUpdater,
+        menuBarIconSettings: MenuBarIconSettings
+    ) {
         self.pluginHost = pluginHost
         self.appUpdater = appUpdater
+        self.menuBarIconSettings = menuBarIconSettings
     }
 
     func showSettings() {
@@ -33,7 +39,11 @@ final class AppWindowRouter {
         window.title = "设置"
         window.minSize = NSSize(width: 860, height: 560)
         window.contentView = NSHostingView(
-            rootView: SettingsView(pluginHost: pluginHost, appUpdater: appUpdater)
+            rootView: SettingsView(
+                pluginHost: pluginHost,
+                appUpdater: appUpdater,
+                menuBarIconSettings: menuBarIconSettings
+            )
         )
         window.isReleasedWhenClosed = false
         window.center()
